@@ -509,62 +509,73 @@ def agent_social_scout(topic, api_key, openrouter_api_key="", limit=8):
 
 
 def agent_write_script(topic, research, language, target_seconds, gemini_api_key="", openrouter_api_key=""):
-    """Create a narration script using Gemini when available, otherwise OpenRouter."""
+    """Create a narration script; fall back between configured providers with useful diagnostics."""
     lang_name = {"ar": "Arabic / Darija-friendly Arabic", "fr": "French", "en": "English"}.get(language, "Arabic")
     words = max(45, int(target_seconds * 1.9))
     prompt = (
-        "Topic: " + topic + "\n"
+        "Topic: " + topic + "\\n"
         "Target video duration: " + str(target_seconds) + " seconds. "
         "Output language: " + lang_name + ". "
         "Write a natural voice-over script of about " + str(words) + " words maximum, "
         "with a strong opening and a clear ending. Match the format to the topic; do not assume it is news. "
-        "Use the research notes below as leads, verify factual claims, and do not invent facts, quotes, dates or statistics. "
-        "Keep source URLs in a final separate section titled Sources, never in the spoken narration. "
-        "Return this structure: TITLE, NARRATION, SOURCES, then a short list of visual beat suggestions. "
-        "Research notes and discovered public social links:\n" + research[:14000]
+        "Use the research notes below as leads. Do not invent facts, quotes, dates or statistics. "
+        "Keep source URLs in a final separate section titled Sources, never in spoken narration. "
+        "Return TITLE, NARRATION, SOURCES, then short visual beat suggestions. "
+        "Research notes and discovered public links:\\n" + (research or "No research notes were returned.")[:14000]
     )
     system_prompt = "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources."
+    errors = []
     if gemini_api_key:
-        client = genai.Client(api_key=gemini_api_key)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={"system_instruction": system_prompt, "tools": [types.Tool(google_search=types.GoogleSearch())]}
-        )
-        result_text = response.text or ""
-    elif openrouter_api_key:
-        payload = json.dumps({
-            "model": "openrouter/free",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": max(1200, min(5000, words * 5))
-        }).encode("utf-8")
-        request = urllib.request.Request(
-            "https://openrouter.ai/api/v1/chat/completions",
-            data=payload,
-            headers={"Authorization": "Bearer " + openrouter_api_key, "Content-Type": "application/json",
-                     "HTTP-Referer": "https://my-ai-agent-fdypqn9sqseempebgo82yf.streamlit.app",
-                     "X-Title": "MY AI AGENT"},
-            method="POST"
-        )
         try:
+            client = genai.Client(api_key=gemini_api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={"system_instruction": system_prompt, "tools": [types.Tool(google_search=types.GoogleSearch())]}
+            )
+            result_text = response.text or ""
+            if result_text.strip():
+                return result_text.strip()
+            errors.append("Gemini رجع نص فارغ")
+        except Exception as exc:
+            errors.append("Gemini: " + str(exc)[:500])
+    if openrouter_api_key:
+        try:
+            payload = json.dumps({
+                "model": "openrouter/free",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.3,
+                "max_tokens": max(1200, min(5000, words * 5))
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                "https://openrouter.ai/api/v1/chat/completions",
+                data=payload,
+                headers={"Authorization": "Bearer " + openrouter_api_key, "Content-Type": "application/json",
+                         "HTTP-Referer": "https://my-ai-agent-fdypqn9sqseempebgo82yf.streamlit.app",
+                         "X-Title": "MY AI AGENT"},
+                method="POST"
+            )
             with urllib.request.urlopen(request, timeout=120) as response:
                 data = json.loads(response.read().decode("utf-8"))
             choices = data.get("choices") or []
             result_text = choices[0].get("message", {}).get("content", "") if choices else ""
-        except Exception as error:
-            raise RuntimeError("OpenRouter فشل فوكيل كتابة السيناريو: " + str(error)[:700])
-    else:
-        raise RuntimeError("زيد GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets.")
-    if isinstance(result_text, list):
-        result_text = " ".join(part.get("text", "") for part in result_text if isinstance(part, dict))
-    if not isinstance(result_text, str) or not result_text.strip():
-        raise RuntimeError("وكيل الكتابة ما رجعش سيناريو صالح.")
-    return result_text.strip()
-
+            if isinstance(result_text, list):
+                result_text = " ".join(part.get("text", "") for part in result_text if isinstance(part, dict))
+            if isinstance(result_text, str) and result_text.strip():
+                return result_text.strip()
+            errors.append("OpenRouter رجع استجابة بلا نص: " + str(data)[:350])
+        except Exception as exc:
+            detail = str(exc)
+            if hasattr(exc, "read"):
+                try:
+                    detail += " | " + exc.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+            errors.append("OpenRouter: " + detail[:900])
+    raise RuntimeError("تعذر إنشاء السيناريو بجميع خدمات الكتابة المتاحة. " + " | ".join(errors or ["ما كاين حتى API key صالح فـ Streamlit Secrets."]))
 
 
 def agent_voiceover(script, language, temp_dir):
