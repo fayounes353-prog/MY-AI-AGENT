@@ -466,7 +466,10 @@ def agent_social_scout(topic, api_key, limit=8):
         "لا تعتبر أن العثور على فيديو يعني أن حقوق إعادة استعماله متاحة."
     )
     social_results = search_anything_on_web(social_query, api_key)
-    reusable_clips = search_reusable_video_clips(topic + " video", limit=limit)
+    try:
+        reusable_clips = search_reusable_video_clips(topic + " video", limit=limit)
+    except Exception:
+        reusable_clips = []
     return social_results, reusable_clips
 
 
@@ -497,6 +500,21 @@ def agent_write_script(topic, research, language, target_seconds, api_key):
     if not response.text or not response.text.strip():
         raise RuntimeError("وكيل الكتابة ما رجعش سيناريو.")
     return response.text.strip()
+
+
+
+def agent_voiceover(script, language, temp_dir):
+    """Extract the narration and create its spoken audio track."""
+    narration = re.split(r"(?im)^\\s*(?:sources|المصادر|المراجع)\\s*[:：]?.*$", script)[0].strip()
+    narration = re.sub(r"(?im)^\\s*(?:narration|التعليق الصوتي|النص)\\s*[:：]\\s*", "", narration)
+    narration = re.sub(r"(?im)^\\s*(?:title|العنوان)\\s*[:：]\\s*.*$", "", narration)
+    narration = re.sub(r"(?m)^\\s*#+\\s*", "", narration)
+    narration = re.sub(r"[*_]", "", narration).strip()
+    if len(narration) < 30:
+        raise RuntimeError("النص الصوتي قصير بزاف أو ما قدرناش نستخرجوه.")
+    voice_path = os.path.join(temp_dir, "voice.mp3")
+    gTTS(text=narration, lang=language, slow=False).save(voice_path)
+    return voice_path
 
 
 def agent_download_cc_videos(clips, temp_dir, max_clips=5):
@@ -536,16 +554,8 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
 
 def agent_edit_video(topic, script, clips, target_seconds, language):
     """Assemble reusable video clips, add narration and render a vertical MP4."""
-    narration = re.split(r"(?im)^\s*(?:sources|المصادر|المراجع)\s*[:：]?.*$", script)[0].strip()
-    narration = re.sub(r"(?im)^\s*(?:narration|التعليق الصوتي|النص)\s*[:：]\s*", "", narration)
-    narration = re.sub(r"(?im)^\s*(?:title|العنوان)\s*[:：]\s*.*$", "", narration)
-    narration = re.sub(r"(?m)^\s*#+\s*", "", narration)
-    narration = re.sub(r"[*_`]", "", narration).strip()
-    if len(narration) < 30:
-        raise RuntimeError("النص الصوتي قصير بزاف أو ما قدرناش نستخرجوه.")
     with tempfile.TemporaryDirectory() as temp_dir:
-        voice_path = os.path.join(temp_dir, "voice.mp3")
-        gTTS(text=narration, lang=language, slow=False).save(voice_path)
+        voice_path = agent_voiceover(script, language, temp_dir)
         usable = agent_download_cc_videos(clips, temp_dir)
         if not usable:
             # Honest fallback: existing renderer uses sourced still images, not stolen social clips.
@@ -712,15 +722,16 @@ if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", u
     else:
         try:
             topic = team_topic.strip()
-            progress = st.progress(0, text="Agent 1/4 — كيقلب فالمحتوى العمومي...")
+            progress = st.progress(0, text="Agent 1/5 — كيقلب فالمحتوى العمومي والشبكات...")
             social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY)
-            progress.progress(25, text="Agent 2/4 — كيكتب السيناريو حسب الموضوع والمدة...")
+            progress.progress(20, text="Agent 2/5 — كيكتب السيناريو...")
             draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY)
-            progress.progress(50, text="Agent 3/4 — كينشئ الصوت وكيركب اللقطات...")
+            progress.progress(40, text="Agent 3/5 — كينشئ التعليق الصوتي...")
+            progress.progress(60, text="Agent 4/5 — كيركب الفيديو وكيضبط المدة...")
             video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language)
-            progress.progress(80, text="Agent 4/4 — كيتحقق من الملف والمدة والسيناريو...")
+            progress.progress(85, text="Agent 5/5 — كيتحقق من الفيديو والسيناريو...")
             verification = agent_verify_output(video_bytes, draft, team_duration, GEMINI_API_KEY)
-            progress.progress(100, text="سالاو مراحل الفريق.")
+            progress.progress(100, text="سالاو الوكلاء الخمسة.")
             st.session_state["team_video"] = video_bytes
             st.session_state["team_script"] = draft
             st.session_state["team_research"] = social_results
