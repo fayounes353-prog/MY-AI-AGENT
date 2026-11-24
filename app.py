@@ -490,6 +490,29 @@ def build_vertical_video(title, script, language="ar"):
             return video_file.read()
 
 
+def agent_find_video_sources(topic, limit=12):
+    """Search multiple generic footage queries so the agent is not tied to one topic category."""
+    queries = [topic + " video", topic + " footage", topic + " trailer"]
+    collected, seen = [], set()
+    errors = []
+    for query in queries:
+        try:
+            for item in search_reusable_video_clips(query, limit=limit):
+                key = item.get("url") or item.get("page") or item.get("title")
+                if key and key not in seen:
+                    seen.add(key)
+                    collected.append(item)
+                if len(collected) >= limit:
+                    return collected
+        except Exception as exc:
+            errors.append(str(exc)[:180])
+    if collected:
+        return collected
+    if errors:
+        raise RuntimeError("تعذر البحث عن ملفات فيديو في Wikimedia بعد تجربة عدة صيغ: " + " | ".join(errors))
+    return []
+
+
 def agent_social_scout(topic, api_key, openrouter_api_key="", limit=8):
     """Scout public web-indexed social posts and separately find reusable video footage."""
     social_query = (
@@ -876,7 +899,7 @@ with st.expander("2️⃣ وكيل العثور على الفيديوهات ال
         else:
             try:
                 with st.spinner("كيقلب على فيديوهات قابلة للاستعمال..."):
-                    st.session_state["agent_clips"] = search_reusable_video_clips(team_topic.strip() + " video", limit=12)
+                    st.session_state["agent_clips"] = agent_find_video_sources(team_topic.strip(), limit=12)
                 st.success(f"لقى {len(st.session_state['agent_clips'])} فيديو مرشح.")
             except Exception as exc: st.error("وكيل الفيديوهات: " + str(exc)[:1200])
     for clip in st.session_state["agent_clips"][:12]:
