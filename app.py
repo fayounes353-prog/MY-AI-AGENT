@@ -333,42 +333,39 @@ with st.sidebar:
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
 st.subheader("🎬 CHNO WA9E3 — Video Studio")
-st.caption("دخل موضوعاً، والوكيل يبحث في الويب ويكتب سيناريو، ثم يصنع فيديو عمودياً بصوت عربي وصور متاحة لإعادة الاستخدام.")
-topic = st.text_input("شنو الموضوع اللي نقلب عليه؟", placeholder="مثال: آخر تطورات كأس العالم 2030")
-if st.button("🔎 بحث وكتابة السيناريو", use_container_width=True):
-    if not topic.strip():
-        st.warning("كتب موضوع البحث أولا.")
-    elif not GEMINI_API_KEY:
-        st.error("البحث في الويب يحتاج GEMINI_API_KEY محفوظاً في Secrets.")
-    else:
-        try:
-            with st.spinner("كنقلب فالويب وكنحضّر سيناريو بالمصادر..."):
-                draft = research_and_write_script(topic.strip(), GEMINI_API_KEY, "gemini-3.5-flash-lite")
-            st.session_state["video_research_draft"] = draft
-            st.session_state["video_topic"] = topic.strip()
-        except Exception as e:
-            st.error("تعذر البحث أو كتابة السيناريو حالياً.")
-            st.code(str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")[:1400])
-
-video_title = st.text_input("عنوان الفيديو", value=st.session_state.get("video_topic", "أهم أخبار اليوم"))
-video_script = st.text_area(
-    "راجع السيناريو أو عدّله قبل الإنتاج",
-    value=st.session_state.get("video_research_draft", ""),
-    height=240,
-    placeholder="من بعد البحث، غادي يظهر هنا السيناريو مع المصادر..."
+st.caption("الوكيل يختار موضوعاً إخبارياً عاماً، يبحث عنه، يكتب السيناريو ويصنع الفيديو بالصوت والصور في خطوة واحدة.")
+auto_topic = st.text_input(
+    "المجال (اختياري)",
+    value=st.session_state.get("auto_video_topic", "آخر أخبار المغرب والعالم"),
+    help="تقدر تخليه كما هو أو تكتب مجالاً بحال التكنولوجيا أو الرياضة."
 )
-if st.button("🎥 صايب الفيديو", type="primary", use_container_width=True):
-    if len(video_script.strip()) < 40:
-        st.warning("خاص السيناريو يكون فيه على الأقل 40 حرف.")
+if st.button("🤖 صايب ليا فيديو جديد بوحدك", type="primary", use_container_width=True):
+    if not GEMINI_API_KEY:
+        st.error("خاص GEMINI_API_KEY يبقى محفوظاً فـ Secrets.")
+    elif not auto_topic.strip():
+        st.warning("كتب المجال اللي بغيتي.")
     else:
         try:
-            with st.spinner("كنصاوب الفيديو والصوت والصور... خليه مفتوح حتى يسالي"):
-                video_bytes = build_vertical_video(video_title.strip() or "CHNO WA9E3", video_script.strip())
+            with st.spinner("1/2 كنقلب على الأخبار وكنكتب السيناريو..."):
+                draft = research_and_write_script(
+                    auto_topic.strip(), GEMINI_API_KEY, "gemini-3.5-flash-lite"
+                )
+            if len(draft.strip()) < 40:
+                raise ValueError("البحث ما رجعش سيناريو كافي. عاود المحاولة.")
+            st.session_state["video_research_draft"] = draft
+            st.session_state["video_topic"] = auto_topic.strip()
+            with st.spinner("2/2 كنركّب الفيديو بالصوت والصور والحركة..."):
+                video_bytes = build_vertical_video(
+                    auto_topic.strip(), draft.strip()
+                )
             st.session_state["generated_video"] = video_bytes
-            st.success("الفيديو واجد!")
+            st.session_state["generated_video_script"] = draft
+            st.success("الفيديو تصاوب بنجاح. تقدر تشوفو وتحملو من هنا.")
         except Exception as e:
-            st.error("ما قدرناش نصاوبو الفيديو هاد المرة.")
-            st.code(str(e)[:1800])
+            safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
+            st.error("ما كملش إنشاء الفيديو هاد المرة.")
+            st.code(safe_error[:1600])
+
 if st.session_state.get("generated_video"):
     st.video(st.session_state["generated_video"])
     st.download_button(
@@ -378,8 +375,10 @@ if st.session_state.get("generated_video"):
         mime="video/mp4",
         use_container_width=True
     )
-st.caption("هاد النسخة كتنتج فيديو من النص بصوت آلي وتصميم CHNO WA9E3. النشر التلقائي للحسابات غادي نربطوه فمرحلة لاحقة.")
+    with st.expander("شوف السيناريو والمصادر"):
+        st.text(st.session_state.get("generated_video_script", ""))
 
+st.caption("هاد الزر كيدير البحث والسيناريو والمونتاج دفعة وحدة. خاص الموقع يبقى محلول أثناء الخدمة. النشر التلقائي وجدولة الفيديوهات مازال ما تفعّلوش.");
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
