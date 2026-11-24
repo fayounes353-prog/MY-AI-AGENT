@@ -202,6 +202,21 @@ def search_internet_archive_videos(query, limit=8):
                 with urllib.request.urlopen(metadata_req, timeout=25) as response:
                     metadata = json.loads(response.read().decode("utf-8"))
                 meta = metadata.get("metadata", {})
+                # Reject loosely related archive results: match the user's actual topic,
+                # not merely one generic word from a broad search.
+                stop_words = {"the","and","for","with","from","video","footage","about","les","des","une","pour","avec","sur","من","في","عن","على","ديال","مع","هذا","هذه","الذي","التي"}
+                topic_terms = {t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", query)
+                               if len(t) > 2 and t.lower() not in stop_words}
+                candidate_text = " ".join([
+                    str(meta.get("title") or ""),
+                    str(meta.get("description") or ""),
+                    str(meta.get("subject") or "")
+                ]).lower()
+                if topic_terms:
+                    matched_terms = {t for t in topic_terms if t in candidate_text}
+                    minimum_matches = 1 if len(topic_terms) == 1 else 2
+                    if len(matched_terms) < minimum_matches:
+                        continue
                 license_url = str(meta.get("licenseurl") or doc.get("licenseurl") or "").lower()
                 if "publicdomain/zero/1.0" in license_url:
                     license_name = "CC0 1.0 / Public Domain dedication"
@@ -597,7 +612,8 @@ def agent_find_video_sources(topic, limit=12):
     """Find actual downloadable reusable video files; try Archive first, then Wikimedia Commons."""
     collected, seen, errors = [], set(), []
     # Internet Archive returns direct media file URLs, not just social/search result pages.
-    for query in [topic, topic + " video", topic + " footage"]:
+    # Search using the user's topic itself; do not broaden it into unrelated generic footage.
+    for query in [topic]:
         try:
             for item in search_internet_archive_videos(query, limit=limit):
                 key = item.get("url") or item.get("page") or item.get("title")
@@ -609,7 +625,7 @@ def agent_find_video_sources(topic, limit=12):
         except Exception as exc:
             errors.append("Internet Archive: " + str(exc)[:180])
     # Wikimedia Commons is a second source; the downloader independently checks its license.
-    for query in [topic + " filetype:video", topic + " video"]:
+    for query in [topic + " filetype:video"]:
         try:
             for item in search_reusable_video_clips(query, limit=limit):
                 key = item.get("url") or item.get("page") or item.get("title")
@@ -817,7 +833,10 @@ def agent_build_narration_text(topic, research, language):
     else:
         intro = "Hello. Today we are talking about " + topic + ". "
         fallback = "This video gives you a short overview of the topic."
-    return (intro + (raw if raw else fallback)).strip()
+    # Keep the spoken narration anchored to the exact topic the user entered.
+    if raw:
+        return (intro + "حسب المعلومات المتاحة حول " + topic + ": " + raw).strip()
+    return (intro + fallback).strip()
 
 
 def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar"):
