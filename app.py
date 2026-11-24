@@ -167,8 +167,8 @@ def make_video_slide(title, paragraph, output_path, index, total, image_path=Non
     img.save(output_path, quality=92)
 
 
-def research_with_openrouter_rss(topic, api_key):
-    """Fallback: collect recent Google News RSS headlines, then draft with OpenRouter."""
+def fetch_news_rss(topic):
+    """Return recent Google News RSS items with their source links."""
     query = urllib.parse.quote(topic + " Morocco OR العالم")
     rss_url = "https://news.google.com/rss/search?q=" + query + "&hl=ar&gl=MA&ceid=MA:ar"
     req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0 MYAIAgent/1.0"})
@@ -181,15 +181,22 @@ def research_with_openrouter_rss(topic, api_key):
         link = (item.findtext("link") or "").strip()
         pubdate = (item.findtext("pubDate") or "").strip()
         if title and link:
-            items.append(f"- {title} | {pubdate} | {link}")
+            items.append({"title": title, "link": link, "date": pubdate})
+    return items
+
+
+def research_with_openrouter_rss(topic, api_key):
+    """Use OpenRouter to draft from RSS; if its free route returns no text, build a cautious headline-only bulletin."""
+    items = fetch_news_rss(topic)
     if not items:
-        raise RuntimeError("ما لقيتش عناوين إخبارية فـ RSS باش نبني عليها السيناريو.")
+        raise RuntimeError("ما لقيتش عناوين إخبارية فـ Google News RSS.")
     prompt = (
-        "اعتمد فقط على العناوين والروابط التالية. أنشئ سيناريو فيديو عربي لقناة CHNO WA9E3 "
-        "مدته 45 إلى 60 ثانية، بعنوان ثم 5 إلى 7 جمل للتعليق الصوتي ثم المصادر. "
-        "لا تضف وقائع أو أرقاما غير موجودة في المصادر، وإذا كانت المعطيات غير كافية قل ذلك بوضوح. "
-        "لا تضع المصادر داخل نص التعليق الصوتي.\n\n"
-        + "\n".join(items)
+        "أنشئ سيناريو فيديو عربي لقناة CHNO WA9E3 مدته 45 إلى 60 ثانية. "
+        "استعمل العناوين التالية فقط ولا تخترع تفاصيل أو أرقاما. "
+        "اكتب عنوانا ثم 5 إلى 7 جمل قصيرة للتعليق الصوتي ثم فقرة المصادر بالروابط. "
+        "إذا كان العنوان وحده لا يكفي لتأكيد التفاصيل، قل: حسب العنوان المنشور. "
+        "لا تضع المصادر داخل التعليق الصوتي.\n\n"
+        + "\n".join(f"- {x['title']} | {x['date']} | {x['link']}" for x in items)
     )
     payload = json.dumps({
         "model": "openrouter/free",
@@ -197,8 +204,8 @@ def research_with_openrouter_rss(topic, api_key):
             {"role": "system", "content": "أنت محرر أخبار دقيق. لا تخترع أي معلومة."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.3,
-        "max_tokens": 1400
+        "temperature": 0.2,
+        "max_tokens": 2200
     }).encode("utf-8")
     request = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -211,12 +218,35 @@ def research_with_openrouter_rss(topic, api_key):
         },
         method="POST"
     )
-    with urllib.request.urlopen(request, timeout=90) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    text = data["choices"][0]["message"]["content"]
-    if not text or len(text.strip()) < 40:
-        raise RuntimeError("OpenRouter ما رجعش سيناريو كافي.")
-    return text.strip()
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        choices = data.get("choices") or []
+        message = choices[0].get("message", {}) if choices else {}
+        content = message.get("content")
+        if isinstance(content, list):
+            content = " ".join(
+                part.get("text", "") for part in content
+                if isinstance(part, dict) and part.get("type") in ("text", "output_text")
+            )
+        if isinstance(content, str) and len(content.strip()) >= 40:
+            return content.strip()
+    except Exception:
+        # RSS fallback below still permits a sourced headline-only video.
+        pass
+
+    # Deterministic fallback: narrate only the published headlines, never invented context.
+    selected = items[:6]
+    lines = [
+        "عنوان: موجز آخر الأخبار حسب العناوين المنشورة",
+        "هذا موجز إخباري مبني على عناوين وروابط منشورة في Google News.",
+    ]
+    for item in selected:
+        lines.append("حسب العنوان المنشور، " + item["title"].rstrip(" .،؛") + ".")
+    lines.append("هذا الموجز يقتصر على ما ورد في العناوين، والتفاصيل الكاملة موجودة في المصادر.")
+    lines.append("المصادر:")
+    lines.extend(f"- {item['title']} — {item['link']}" for item in selected)
+    return "\n".join(lines)
 
 
 def research_and_write_script(topic, api_key, model):
