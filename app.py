@@ -515,7 +515,7 @@ if st.session_state.get("universal_search_result"):
     q_encoded = urllib.parse.quote_plus(st.session_state.get("universal_search_query", ""))
     st.markdown("**زيد قلب مباشرة فمواقع أخرى:**")
     st.markdown(
-        f"[Google] (https://www.google.com/search?q={q_encoded}) · "
+        f"[Google](https://www.google.com/search?q={q_encoded}) · "
         f"[Google Videos](https://www.google.com/search?tbm=vid&q={q_encoded}) · "
         f"[YouTube](https://www.youtube.com/results?search_query={q_encoded}) · "
         f"[Internet Archive](https://archive.org/search?query={q_encoded}) · "
