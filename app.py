@@ -831,7 +831,7 @@ def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None):
         with open(listing, "w", encoding="utf-8") as listing_file:
             for path in segment_paths:
                 escaped_path = path.replace("'", "'\\''")
-                listing_file.write("file '" + escaped_path + "'\\n")
+                listing_file.write("file '" + escaped_path + "'\n")
         output = os.path.join(temp_dir, "final.mp4")
         joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
                                  "-t", str(int(target_seconds)),
