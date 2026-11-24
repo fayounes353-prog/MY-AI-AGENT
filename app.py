@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import urllib.request
+import urllib.parse
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -130,7 +131,7 @@ def make_video_slide(title, paragraph, output_path, index, total, image_path=Non
 
     draw.text((width-75, 95), rtl("CHNO WA9E3"), font=title_font, fill=(255,255,255), anchor="ra")
     draw.text((width-75, 220), rtl("الحقيقة قبل العنوان"), font=small_font, fill=(255,105,105), anchor="ra")
-    draw.rounded_rectangle((55, 390, 1025, 1510), radius=36, fill=(5, 16, 34, 205), outline=(220,38,48), width=3)
+    draw.rounded_rectangle((55, 390, 1025, 1510), radius=36, fill=(5, 16, 34), outline=(220,38,48), width=3)
 
     words = paragraph.split()
     lines, current = [], ""
