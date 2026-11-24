@@ -170,7 +170,7 @@ def research_and_write_script(topic, api_key, model):
     """Use web-grounded Gemini research to draft a short Arabic news video script."""
     client = genai.Client(api_key=api_key)
     prompt = (
-        "ابحث في الويب عن آخر المعلومات الموثوقة حول الموضوع التالي: " + topic + "\\n"
+        "ابحث في الويب عن آخر المعلومات الموثوقة حول الموضوع التالي: " + topic + "\n"
         "اكتب سيناريو فيديو عربي قصير لقناة CHNO WA9E3 مدته 45 إلى 60 ثانية. "
         "استعمل معلومات حديثة فقط إذا وجدت مصادر موثوقة، وميّز بين المؤكد وغير المؤكد. "
         "لا تخترع أرقاما أو تصريحات. ابدأ بعنوان جذاب ثم 5 إلى 7 جمل قصيرة مناسبة للتعليق الصوتي. "
@@ -219,7 +219,7 @@ def build_vertical_video(title, script, language="ar"):
             [ffmpeg, "-i", audio_path, "-f", "null", "-"],
             capture_output=True, text=True, timeout=60
         )
-        duration_match = re.search(r"Duration: (\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", probe.stderr or "")
+        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr or "")
         if duration_match:
             hh, mm, ss = duration_match.groups()
             audio_duration = int(hh) * 3600 + int(mm) * 60 + float(ss)
