@@ -801,11 +801,11 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
 
 def agent_build_narration_text(topic, research, language):
     """Create a simple spoken summary from saved research without adding a separate script-writing agent."""
-    raw = re.sub(r"https?://\\S+", "", str(research or ""))
-    raw = re.sub(r"(?m)^\\s*[-#>*]+\\s*", "", raw)
-    raw = re.sub(r"[\\*_\\[\\]{}|]", " ", raw)
-    raw = re.sub(r"(?m)^\\s*(?:sources|المصادر|المراجع)\\s*[:：]?.*$", "", raw, flags=re.I)
-    raw = re.sub(r"\\s+", " ", raw).strip()
+    raw = re.sub(r"https?://\S+", "", str(research or ""))
+    raw = re.sub(r"(?m)^\s*[-#>*]+\s*", "", raw)
+    raw = re.sub(r"[\*_\[\]{}|]", " ", raw)
+    raw = re.sub(r"(?m)^\s*(?:sources|المصادر|المراجع)\s*[:：]?.*$", "", raw, flags=re.I)
+    raw = re.sub(r"\s+", " ", raw).strip()
     # Avoid reading long link lists or excessive search output aloud.
     raw = raw[:1100].rsplit(" ", 1)[0] if len(raw) > 1100 else raw
     if language == "ar":
