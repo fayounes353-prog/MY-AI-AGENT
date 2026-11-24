@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import urllib.request
 import urllib.parse
+import xml.etree.ElementTree as ET
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -164,6 +165,58 @@ def make_video_slide(title, paragraph, output_path, index, total, image_path=Non
     draw.rectangle((70, 1760, 70+progress_w, 1770), fill=(220,38,48))
     draw.text((width//2, 1825), rtl(f"المشهد {index+1} / {total}"), font=small_font, fill=(220,230,245), anchor="mm")
     img.save(output_path, quality=92)
+
+
+def research_with_openrouter_rss(topic, api_key):
+    """Fallback: collect recent Google News RSS headlines, then draft with OpenRouter."""
+    query = urllib.parse.quote(topic + " Morocco OR العالم")
+    rss_url = "https://news.google.com/rss/search?q=" + query + "&hl=ar&gl=MA&ceid=MA:ar"
+    req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0 MYAIAgent/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as response:
+        xml_data = response.read()
+    root = ET.fromstring(xml_data)
+    items = []
+    for item in root.findall(".//item")[:12]:
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        pubdate = (item.findtext("pubDate") or "").strip()
+        if title and link:
+            items.append(f"- {title} | {pubdate} | {link}")
+    if not items:
+        raise RuntimeError("ما لقيتش عناوين إخبارية فـ RSS باش نبني عليها السيناريو.")
+    prompt = (
+        "اعتمد فقط على العناوين والروابط التالية. أنشئ سيناريو فيديو عربي لقناة CHNO WA9E3 "
+        "مدته 45 إلى 60 ثانية، بعنوان ثم 5 إلى 7 جمل للتعليق الصوتي ثم المصادر. "
+        "لا تضف وقائع أو أرقاما غير موجودة في المصادر، وإذا كانت المعطيات غير كافية قل ذلك بوضوح. "
+        "لا تضع المصادر داخل نص التعليق الصوتي.\n\n"
+        + "\n".join(items)
+    )
+    payload = json.dumps({
+        "model": "openrouter/free",
+        "messages": [
+            {"role": "system", "content": "أنت محرر أخبار دقيق. لا تخترع أي معلومة."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 1400
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://my-ai-agent.streamlit.app",
+            "X-Title": "CHNO WA9E3 Video Studio"
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    text = data["choices"][0]["message"]["content"]
+    if not text or len(text.strip()) < 40:
+        raise RuntimeError("OpenRouter ما رجعش سيناريو كافي.")
+    return text.strip()
 
 
 def research_and_write_script(topic, api_key, model):
@@ -355,9 +408,20 @@ if st.button("🤖 صايب ليا فيديو جديد بوحدك", type="primar
     else:
         try:
             with st.spinner("1/2 كنقلب على الأخبار وكنكتب السيناريو..."):
-                draft = research_and_write_script(
-                    auto_topic.strip(), GEMINI_API_KEY, "gemini-3.5-flash-lite"
-                )
+                try:
+                    draft = research_and_write_script(
+                        auto_topic.strip(), GEMINI_API_KEY, "gemini-3.5-flash-lite"
+                    )
+                except Exception as gemini_error:
+                    if "429" not in str(gemini_error) and "RESOURCE_EXHAUSTED" not in str(gemini_error):
+                        raise
+                    if not OPENROUTER_API_KEY:
+                        raise RuntimeError(
+                            "حصة Gemini سالات (429)، وما كاينش OPENROUTER_API_KEY محفوظ كبديل. "
+                            "زيد مفتاح OpenRouter فـ Streamlit Secrets أو تسنى حتى ترجع الحصة."
+                        )
+                    st.warning("Gemini وصل للحد المجاني؛ كنحوّل تلقائياً إلى OpenRouter مع عناوين Google News RSS.")
+                    draft = research_with_openrouter_rss(auto_topic.strip(), OPENROUTER_API_KEY)
             if len(draft.strip()) < 40:
                 raise ValueError("البحث ما رجعش سيناريو كافي. عاود المحاولة.")
             st.session_state["video_research_draft"] = draft
