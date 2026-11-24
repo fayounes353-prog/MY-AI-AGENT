@@ -505,6 +505,9 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
     downloaded = []
     for item in clips:
         license_text = (item.get("license") or "").strip().lower()
+        # Do not edit NonCommercial or NoDerivatives media; only use clearly reusable licenses.
+        if "nc" in license_text or "non-commercial" in license_text or "nd" in license_text or "no derivatives" in license_text:
+            continue
         if not any(mark in license_text for mark in accepted):
             continue
         url = item.get("url", "")
@@ -752,6 +755,7 @@ if st.session_state.get("team_video"):
             st.markdown(f"**{clip['title']}** — {clip['license']} — {clip['artist']}")
             if clip.get("page"):
                 st.markdown(f"[المصدر والترخيص]({clip['page']})")
+            st.caption("احتافظ باسم صاحب العمل والترخيص عند النشر، وراجع شروط صفحة الملف.")
 
 st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
 st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
