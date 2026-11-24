@@ -3,6 +3,7 @@ import hmac
 import time
 import streamlit as st
 from google import genai
+from google.genai import types
 
 st.set_page_config(
     page_title="MY AI AGENT",
@@ -65,6 +66,7 @@ with st.sidebar:
         "Assistant mode",
         ["General assistant", "Writing", "Programming", "Study & explanation", "Ideas & content"],
     )
+    web_search = st.checkbox("البحث في الإنترنت (Google)", value=False)
     if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -118,10 +120,15 @@ if question:
                     # Retry temporary provider overload (HTTP 503) up to three times.
                     for attempt in range(3):
                         try:
+                            request_config = {"system_instruction": system_instruction}
+                            if web_search:
+                                request_config["tools"] = [
+                                    types.Tool(google_search=types.GoogleSearch())
+                                ]
                             response = client.models.generate_content(
                                 model=model,
                                 contents=history,
-                                config={"system_instruction": system_instruction},
+                                config=request_config,
                             )
                             break
                         except Exception as e:
