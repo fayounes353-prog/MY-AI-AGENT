@@ -799,7 +799,28 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
     return downloaded
 
 
-def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None):
+def agent_build_narration_text(topic, research, language):
+    """Create a simple spoken summary from saved research without adding a separate script-writing agent."""
+    raw = re.sub(r"https?://\\S+", "", str(research or ""))
+    raw = re.sub(r"(?m)^\\s*[-#>*]+\\s*", "", raw)
+    raw = re.sub(r"[\\*_\\[\\]{}|]", " ", raw)
+    raw = re.sub(r"(?m)^\\s*(?:sources|المصادر|المراجع)\\s*[:：]?.*$", "", raw, flags=re.I)
+    raw = re.sub(r"\\s+", " ", raw).strip()
+    # Avoid reading long link lists or excessive search output aloud.
+    raw = raw[:1100].rsplit(" ", 1)[0] if len(raw) > 1100 else raw
+    if language == "ar":
+        intro = "مرحبا بكم. موضوعنا اليوم هو " + topic + ". "
+        fallback = "في هذا الفيديو نقدم لكم لمحة عامة عن هذا الموضوع، ونتمنى أن يكون المحتوى مفيدا."
+    elif language == "fr":
+        intro = "Bonjour. Aujourd'hui, nous parlons de " + topic + ". "
+        fallback = "Cette vidéo vous présente un aperçu général du sujet."
+    else:
+        intro = "Hello. Today we are talking about " + topic + ". "
+        fallback = "This video gives you a short overview of the topic."
+    return (intro + (raw if raw else fallback)).strip()
+
+
+def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar"):
     """Editor agent: assemble reusable footage into a silent MP4; no script or voiceover stage."""
     with tempfile.TemporaryDirectory() as temp_dir:
         usable = agent_download_cc_videos(clips, temp_dir)
@@ -858,9 +879,23 @@ def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None):
                                 capture_output=True, text=True, timeout=300)
         if joined.returncode != 0 or not os.path.exists(output) or os.path.getsize(output) < 10000:
             raise RuntimeError("فشل تجميع مقاطع الفيديو: " + (joined.stderr or "")[-1100:])
-        with open(output, "rb") as f:
+        # Generate spoken audio directly from the research notes; no separate script agent.
+        voice_path = os.path.join(temp_dir, "narration.mp3")
+        gTTS(text=narration_text or agent_build_narration_text(topic, "", language),
+             lang=language, slow=False).save(voice_path)
+        voiced_output = os.path.join(temp_dir, "final_with_voice.mp4")
+        muxed = subprocess.run(
+            [ffmpeg, "-y", "-i", output, "-i", voice_path,
+             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+             "-c:a", "aac", "-b:a", "128k", "-af", "apad",
+             "-t", str(int(target_seconds)), "-movflags", "+faststart", voiced_output],
+            capture_output=True, text=True, timeout=180
+        )
+        if muxed.returncode != 0 or not os.path.exists(voiced_output) or os.path.getsize(voiced_output) < 10000:
+            raise RuntimeError("الفيديو تْركّب ولكن إضافة التعليق الصوتي فشلات: " + (muxed.stderr or "")[-900:])
+        with open(voiced_output, "rb") as f:
             video_bytes = f.read()
-        return video_bytes, usable, "تم تجميع مقاطع الفيديو المرخصة في MP4 بدون سيناريو أو تعليق صوتي."
+        return video_bytes, usable, "تم تجميع الفيديو وإضافة تعليق صوتي آلي باللغة المختارة."
 
 
 def agent_verify_output(video_bytes, script, target_seconds, api_key):
@@ -1040,11 +1075,11 @@ with st.expander("2️⃣ وكيل العثور على الفيديوهات ال
         st.markdown(f"- **{clip.get('title','Video')}** — {clip.get('license','license unknown')} — [المصدر]({clip.get('page')})" if clip.get("page") else f"- {clip.get('title','Video')} — {clip.get('license','license unknown')}")
 
 with st.expander("3️⃣ وكيل المونتاج"):
-    st.write("كيجمع الفيديوهات المرخصة أو الفيديوهات اللي رفعتَها ويخرج MP4 صامتاً، بلا سيناريو وبلا تعليق صوتي.")
+    st.write("كيجمع الفيديوهات المرخصة أو اللي رفعتَها، ويضيف تعليقاً صوتياً آلياً اعتماداً على نتائج البحث، بلا مرحلة سيناريو مستقلة.")
     if st.button("شغّل وكيل المونتاج", key="run_editor"):
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
-                video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos)
+                video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), st.session_state["agent_research"], team_language), team_language)
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"] = used
             st.session_state["team_edit_note"] = note
@@ -1076,14 +1111,14 @@ if st.button("🚀 شغّل الفريق كامل بالترتيب", type="prima
             clips = agent_find_video_sources(team_topic.strip(), limit=12)
             st.session_state["agent_clips"] = clips
             progress.progress(2/4, text="3/4 — المونتاج...")
-            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos)
+            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), research, team_language), team_language)
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
             progress.progress(3/4, text="4/4 — التحقق...")
             verification = agent_verify_output(video, "", team_duration, "")
             st.session_state["agent_verify"] = verification
             progress.progress(1.0, text="4/4 — اكتمل الفريق.")
-            st.success("الفريق كمل. الفيديو بدون سيناريو أو تعليق صوتي؛ راجع حقوق الاستعمال قبل النشر.")
+            st.success("الفريق كمل. الفيديو فيه تعليق صوتي آلي؛ راجع دقة المعلومات وحقوق الاستعمال قبل النشر.")
         except Exception as exc:
             st.error("توقف الفريق: " + str(exc)[:1800])
     else:
