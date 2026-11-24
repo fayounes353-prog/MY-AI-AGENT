@@ -473,15 +473,12 @@ def agent_social_scout(topic, api_key, limit=8):
     return social_results, reusable_clips
 
 
-def agent_write_script(topic, research, language, target_seconds, api_key):
-    """Create a narration script tailored to the requested topic, language and runtime."""
-    if not api_key:
-        raise RuntimeError("خاص GEMINI_API_KEY باش وكيل الكتابة يتحقق من المصادر ويكتب السيناريو.")
+def agent_write_script(topic, research, language, target_seconds, gemini_api_key="", openrouter_api_key=""):
+    """Create a narration script using Gemini when available, otherwise OpenRouter."""
     lang_name = {"ar": "Arabic / Darija-friendly Arabic", "fr": "French", "en": "English"}.get(language, "Arabic")
     words = max(45, int(target_seconds * 1.9))
-    client = genai.Client(api_key=api_key)
     prompt = (
-        "Topic: " + topic + "\n"
+        "Topic: " + topic + "\\n"
         "Target video duration: " + str(target_seconds) + " seconds. "
         "Output language: " + lang_name + ". "
         "Write a natural voice-over script of about " + str(words) + " words maximum, "
@@ -489,17 +486,49 @@ def agent_write_script(topic, research, language, target_seconds, api_key):
         "Use the research notes below as leads, verify factual claims, and do not invent facts, quotes, dates or statistics. "
         "Keep source URLs in a final separate section titled Sources, never in the spoken narration. "
         "Return this structure: TITLE, NARRATION, SOURCES, then a short list of visual beat suggestions. "
-        "Research notes and discovered public social links:\n" + research[:14000]
+        "Research notes and discovered public social links:\\n" + research[:14000]
     )
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={"system_instruction": "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources." ,
-                "tools": [types.Tool(google_search=types.GoogleSearch())]}
-    )
-    if not response.text or not response.text.strip():
-        raise RuntimeError("وكيل الكتابة ما رجعش سيناريو.")
-    return response.text.strip()
+    system_prompt = "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources."
+    if gemini_api_key:
+        client = genai.Client(api_key=gemini_api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"system_instruction": system_prompt, "tools": [types.Tool(google_search=types.GoogleSearch())]}
+        )
+        result_text = response.text or ""
+    elif openrouter_api_key:
+        payload = json.dumps({
+            "model": "openrouter/free",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3,
+            "max_tokens": max(1200, min(5000, words * 5))
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=payload,
+            headers={"Authorization": "Bearer " + openrouter_api_key, "Content-Type": "application/json",
+                     "HTTP-Referer": "https://my-ai-agent-fdypqn9sqseempebgo82yf.streamlit.app",
+                     "X-Title": "MY AI AGENT"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            choices = data.get("choices") or []
+            result_text = choices[0].get("message", {}).get("content", "") if choices else ""
+        except Exception as error:
+            raise RuntimeError("OpenRouter فشل فوكيل كتابة السيناريو: " + str(error)[:700])
+    else:
+        raise RuntimeError("زيد GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets.")
+    if isinstance(result_text, list):
+        result_text = " ".join(part.get("text", "") for part in result_text if isinstance(part, dict))
+    if not isinstance(result_text, str) or not result_text.strip():
+        raise RuntimeError("وكيل الكتابة ما رجعش سيناريو صالح.")
+    return result_text.strip()
 
 
 
@@ -741,15 +770,15 @@ team_source_videos = st.file_uploader(
 if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", use_container_width=True):
     if not team_topic.strip():
         st.warning("كتب الموضوع أولاً.")
-    elif not GEMINI_API_KEY:
-        st.error("خاص GEMINI_API_KEY فـ Streamlit Secrets باش البحث والكتابة والتحقق يخدمو. ما غاديش ندّعيو أن الوكلاء خدمو بلاه.")
+    elif not (GEMINI_API_KEY or OPENROUTER_API_KEY):
+        st.error("خاص GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets باش يخدم وكيل الكتابة.")
     else:
         try:
             topic = team_topic.strip()
             progress = st.progress(0, text="Agent 1/5 — كيقلب فالمحتوى العمومي والشبكات...")
             social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY)
             progress.progress(20, text="Agent 2/5 — كيكتب السيناريو...")
-            draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY)
+            draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
             progress.progress(40, text="Agent 3/5 — كينشئ التعليق الصوتي...")
             progress.progress(60, text="Agent 4/5 — كيركب الفيديو وكيضبط المدة...")
             video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language, team_source_videos)
