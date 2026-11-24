@@ -660,26 +660,27 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
         except Exception as exc:
             errors.append("Gemini: " + str(exc)[:500])
     if openrouter_api_key:
-        # A second, shorter attempt handles free providers that stop early with finish_reason=length.
+        # Try multiple free routing modes because individual free providers can be unavailable.
+        short_prompt = (
+            "Write a complete, concise " + lang_name + " voice-over for: " + topic + ". "
+            "Target " + str(max(45, int(words * 0.65))) + " spoken words. "
+            "Use only these notes; do not invent facts: " + research_notes[:3500] +
+            "\nReturn TITLE, NARRATION and SOURCES. Finish with a complete sentence."
+        )
         attempts = [
-            (prompt, max(1800, min(4000, words * 18))),
-            (
-                "Write a complete, concise " + lang_name + " voice-over for: " + topic + ". "
-                "Target " + str(max(45, int(words * 0.65))) + " spoken words. "
-                "Use only these notes; do not invent facts: " + research_notes[:4500] +
-                "\nReturn TITLE, NARRATION and SOURCES. Finish with a complete sentence.",
-                4000
-            )
+            ("openrouter/free", prompt, max(1400, min(2600, words * 12))),
+            ("openrouter/free:online", short_prompt, 1800),
+            ("openrouter/free", short_prompt, 1800),
         ]
-        for attempt_no, (attempt_prompt, token_limit) in enumerate(attempts, start=1):
+        for attempt_no, (model_name, attempt_prompt, token_limit) in enumerate(attempts, start=1):
             try:
                 payload = json.dumps({
-                    "model": "openrouter/free",
+                    "model": model_name,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": attempt_prompt}
                     ],
-                    "temperature": 0.2,
+                    "temperature": 0.15,
                     "max_tokens": token_limit
                 }).encode("utf-8")
                 request = urllib.request.Request(
@@ -707,12 +708,11 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
                     if finish_reason != "length":
                         return cleaned
                     errors.append("OpenRouter المحاولة " + str(attempt_no) + " تقطعات بسبب حد طول الإجابة")
-                    # Accept a length-limited answer only if it ends cleanly and contains a usable narration.
-                    if re.search(r"[.!؟؟][\"'»)]?\s*$", cleaned) and re.search(r"(?i)NARRATION|التعليق الصوتي|النص", cleaned):
+                    if re.search(r"[.!؟؟][\\"'»)]?\\s*$", cleaned) and re.search(r"(?i)NARRATION|التعليق الصوتي|النص", cleaned):
                         if attempt_no == len(attempts):
                             return cleaned
                 else:
-                    errors.append("OpenRouter المحاولة " + str(attempt_no) + " رجعات بلا نص كافٍ")
+                    errors.append("OpenRouter " + model_name + " المحاولة " + str(attempt_no) + " رجعات بلا نص كافٍ")
             except Exception as exc:
                 detail = str(exc)
                 if hasattr(exc, "read"):
@@ -720,7 +720,7 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
                         detail += " | " + exc.read().decode("utf-8", errors="replace")[:400]
                     except Exception:
                         pass
-                errors.append("OpenRouter المحاولة " + str(attempt_no) + ": " + detail[:650])
+                errors.append("OpenRouter " + model_name + " المحاولة " + str(attempt_no) + ": " + detail[:500])
     raise RuntimeError("تعذر إنشاء السيناريو. " + " | ".join(errors or ["ما كاين حتى API key صالح فـ Streamlit Secrets."]))
 
 
