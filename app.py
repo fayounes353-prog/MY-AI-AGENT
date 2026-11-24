@@ -166,6 +166,28 @@ def make_video_slide(title, paragraph, output_path, index, total, image_path=Non
     img.save(output_path, quality=92)
 
 
+def research_and_write_script(topic, api_key, model):
+    """Use web-grounded Gemini research to draft a short Arabic news video script."""
+    client = genai.Client(api_key=api_key)
+    prompt = (
+        "ابحث في الويب عن آخر المعلومات الموثوقة حول الموضوع التالي: " + topic + "\\n"
+        "اكتب سيناريو فيديو عربي قصير لقناة CHNO WA9E3 مدته 45 إلى 60 ثانية. "
+        "استعمل معلومات حديثة فقط إذا وجدت مصادر موثوقة، وميّز بين المؤكد وغير المؤكد. "
+        "لا تخترع أرقاما أو تصريحات. ابدأ بعنوان جذاب ثم 5 إلى 7 جمل قصيرة مناسبة للتعليق الصوتي. "
+        "في النهاية أضف فقرة بعنوان المصادر تتضمن روابط أو أسماء المصادر التي اعتمدت عليها. "
+        "لا تنقل نصوصا محمية ولا تعِد نشر فيديوهات الآخرين."
+    )
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config={
+            "system_instruction": "أنت محرر أخبار دقيق. تحقق من الوقائع واستعمل البحث في الويب.",
+            "tools": [types.Tool(google_search=types.GoogleSearch())],
+        },
+    )
+    return response.text or "لم يتم إنشاء السيناريو. حاول مرة أخرى."
+
+
 def build_vertical_video(title, script, language="ar"):
     paragraphs = [p.strip() for p in re.split(r"(?<=[.!؟])\s+|\n+", script) if p.strip()]
     if not paragraphs:
@@ -295,19 +317,36 @@ with st.sidebar:
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
 st.subheader("🎬 CHNO WA9E3 — Video Studio")
-st.caption("حوّل النص إلى فيديو عمودي 9:16 بصوت عربي، جاهز للتحميل والنشر.")
-video_title = st.text_input("عنوان الفيديو", value="أهم أخبار اليوم")
+st.caption("دخل موضوعاً، والوكيل يبحث في الويب ويكتب سيناريو، ثم يصنع فيديو عمودياً بصوت عربي وصور متاحة لإعادة الاستخدام.")
+topic = st.text_input("شنو الموضوع اللي نقلب عليه؟", placeholder="مثال: آخر تطورات كأس العالم 2030")
+if st.button("🔎 بحث وكتابة السيناريو", use_container_width=True):
+    if not topic.strip():
+        st.warning("كتب موضوع البحث أولا.")
+    elif not GEMINI_API_KEY:
+        st.error("البحث في الويب يحتاج GEMINI_API_KEY محفوظاً في Secrets.")
+    else:
+        try:
+            with st.spinner("كنقلب فالويب وكنحضّر سيناريو بالمصادر..."):
+                draft = research_and_write_script(topic.strip(), GEMINI_API_KEY, "gemini-3.5-flash-lite")
+            st.session_state["video_research_draft"] = draft
+            st.session_state["video_topic"] = topic.strip()
+        except Exception as e:
+            st.error("تعذر البحث أو كتابة السيناريو حالياً.")
+            st.code(str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")[:1400])
+
+video_title = st.text_input("عنوان الفيديو", value=st.session_state.get("video_topic", "أهم أخبار اليوم"))
 video_script = st.text_area(
-    "النص اللي غادي يتقال فالفيديو",
-    height=220,
-    placeholder="كتب أو لصق هنا النص النهائي للفيديو. كل فقرة أو جملة غادي تولّي مشهد..."
+    "راجع السيناريو أو عدّله قبل الإنتاج",
+    value=st.session_state.get("video_research_draft", ""),
+    height=240,
+    placeholder="من بعد البحث، غادي يظهر هنا السيناريو مع المصادر..."
 )
 if st.button("🎥 صايب الفيديو", type="primary", use_container_width=True):
     if len(video_script.strip()) < 40:
-        st.warning("زيد النص شوية؛ خاص على الأقل 40 حرف.")
+        st.warning("خاص السيناريو يكون فيه على الأقل 40 حرف.")
     else:
         try:
-            with st.spinner("كنصاوب الفيديو والصوت... خليه مفتوح حتى يسالي"):
+            with st.spinner("كنصاوب الفيديو والصوت والصور... خليه مفتوح حتى يسالي"):
                 video_bytes = build_vertical_video(video_title.strip() or "CHNO WA9E3", video_script.strip())
             st.session_state["generated_video"] = video_bytes
             st.success("الفيديو واجد!")
