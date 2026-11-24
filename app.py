@@ -578,6 +578,14 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
     raise RuntimeError("تعذر إنشاء السيناريو بجميع خدمات الكتابة المتاحة. " + " | ".join(errors or ["ما كاين حتى API key صالح فـ Streamlit Secrets."]))
 
 
+def agent_create_voiceover_bytes(script, language):
+    """Voiceover agent: create an MP3 artifact that can be passed to the editor."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = agent_voiceover(script, language, temp_dir)
+        with open(path, "rb") as audio_file:
+            return audio_file.read()
+
+
 def agent_voiceover(script, language, temp_dir):
     """Extract the narration and create its spoken audio track."""
     narration = re.split(r"(?im)^\s*(?:sources|المصادر|المراجع)\s*[:：]?.*$", script)[0].strip()
@@ -627,10 +635,15 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
     return downloaded
 
 
-def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_sources=None):
-    """Assemble reusable video clips, add narration and render a vertical MP4."""
+def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_sources=None, voiceover_bytes=None):
+    """Editor agent: consume researched clips, uploaded footage and the voiceover artifact."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        voice_path = agent_voiceover(script, language, temp_dir)
+        if voiceover_bytes:
+            voice_path = os.path.join(temp_dir, "voice.mp3")
+            with open(voice_path, "wb") as audio_file:
+                audio_file.write(voiceover_bytes)
+        else:
+            voice_path = agent_voiceover(script, language, temp_dir)
         usable = agent_download_cc_videos(clips, temp_dir)
         # User-provided footage is a reliable alternative when social platforms block downloads.
         for upload_index, uploaded in enumerate(uploaded_sources or []):
@@ -811,54 +824,148 @@ with st.sidebar:
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
-st.subheader("🧠 فريق الوكلاء — من الفكرة حتى الفيديو")
-st.caption("حدد الموضوع والمدة واللغة؛ الوكلاء كيقلبو فالمحتوى العمومي، يكتبو، يركبو الفيديو، ومن بعد يتحققو من النتيجة.")
-team_topic = st.text_input("شنو الموضوع أو الفكرة؟", placeholder="مثلاً: قصة اختراع الهاتف، نهائي كرة القدم، نصائح السفر...")
+st.subheader("🧠 فريق الوكلاء — كل وكيل مستقل")
+st.caption("شغّل كل وكيل بوحدو وراجع النتيجة ديالو. كل وكيل كيستعمل مخرجات الوكلاء السابقين؛ وتقدر تعاود أي مرحلة بلا ما تعاود المشروع كامل.")
+team_topic = st.text_input("الموضوع", placeholder="مثلاً: Foot Maroc أو GTA 6 أو أي موضوع آخر", key="agent_topic")
 team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
 team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
-team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية")
+team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية", key="agent_duration")
 team_source_videos = st.file_uploader(
-    "فيديوهات المصدر (اختياري ولكن ضروري إذا ما لقاوش الوكلاء ملفات مرخّصة)",
+    "فيديوهات تملك حق استعمالها (اختياري)",
     type=["mp4", "mov", "m4v", "webm", "mkv", "avi"],
     accept_multiple_files=True,
-    help="ارفع فيديوهات تملك حق استعمالها. الوكلاء سيستعملونها بدل الاكتفاء بروابط الشبكات الاجتماعية."
+    key="agent_uploads"
 )
-if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", use_container_width=True):
+
+if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
+if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
+if "agent_script" not in st.session_state: st.session_state["agent_script"] = ""
+if "agent_voice" not in st.session_state: st.session_state["agent_voice"] = b""
+if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
+if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
+
+def agent_ready():
     if not team_topic.strip():
-        st.warning("كتب الموضوع أولاً.")
-    elif not (GEMINI_API_KEY or OPENROUTER_API_KEY):
-        st.error("خاص GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets باش يخدم وكيل الكتابة.")
-    else:
-        stage = "تهيئة المهمة"
+        st.error("كتب الموضوع أولاً.")
+        return False
+    if not (GEMINI_API_KEY or OPENROUTER_API_KEY):
+        st.error("خاص GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets.")
+        return False
+    return True
+
+st.markdown("#### الوكلاء والمهام ديالهم")
+with st.expander("1️⃣ وكيل البحث — كيقلب على الموضوع بلا تخصيص مسبق", expanded=True):
+    st.write("كيبحث فالويب على أي موضوع: رياضة، ألعاب، أخبار، تكنولوجيا، قصص... وكيجمع الروابط والمعلومات. ما كيعتمدش على GTA أو كرة القدم فقط.")
+    if st.button("شغّل وكيل البحث", key="run_research"):
+        if agent_ready():
+            try:
+                with st.spinner("وكيل البحث كيقلب..."):
+                    research, clips = agent_social_scout(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+                st.session_state["agent_research"] = research
+                st.session_state["agent_clips"] = clips
+                st.success("وكيل البحث سالا.")
+                st.markdown(research)
+                st.caption(f"ملفات فيديو مرشحة من Wikimedia: {len(clips)}")
+            except Exception as exc: st.error("وكيل البحث: " + str(exc)[:1500])
+    if st.session_state["agent_research"]:
+        st.text_area("نتيجة البحث المحفوظة", st.session_state["agent_research"], height=160, key="research_preview")
+
+with st.expander("2️⃣ وكيل العثور على الفيديوهات المرخصة"):
+    st.write("كيجمع فيديوهات CC/Public Domain المتاحة. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
+    if st.button("شغّل وكيل الفيديوهات", key="run_clips"):
+        if not team_topic.strip(): st.error("كتب الموضوع أولاً.")
+        else:
+            try:
+                with st.spinner("كيقلب على فيديوهات قابلة للاستعمال..."):
+                    st.session_state["agent_clips"] = search_reusable_video_clips(team_topic.strip() + " video", limit=12)
+                st.success(f"لقى {len(st.session_state['agent_clips'])} فيديو مرشح.")
+            except Exception as exc: st.error("وكيل الفيديوهات: " + str(exc)[:1200])
+    for clip in st.session_state["agent_clips"][:12]:
+        st.markdown(f"- **{clip.get('title','Video')}** — {clip.get('license','license unknown')} — [المصدر]({clip.get('page')})" if clip.get("page") else f"- {clip.get('title','Video')} — {clip.get('license','license unknown')}")
+
+with st.expander("3️⃣ وكيل كتابة السيناريو"):
+    st.write("كيكتب نصاً مناسباً للموضوع والمدة، وكيستعمل نتائج البحث المحفوظة. ما كيفترضش أن الموضوع خبر رياضي.")
+    if st.button("شغّل وكيل السيناريو", key="run_script"):
+        if agent_ready():
+            try:
+                with st.spinner("كيكتب السيناريو..."):
+                    st.session_state["agent_script"] = agent_write_script(team_topic.strip(), st.session_state["agent_research"], team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
+                st.success("السيناريو واجد.")
+            except Exception as exc: st.error("وكيل السيناريو: " + str(exc)[:1800])
+    if st.session_state["agent_script"]:
+        st.text_area("السيناريو الناتج", st.session_state["agent_script"], height=220, key="script_preview")
+
+with st.expander("4️⃣ وكيل التعليق الصوتي"):
+    st.write("كيحوّل السيناريو المحفوظ إلى ملف MP3 مستقل.")
+    if st.button("شغّل وكيل الصوت", key="run_voice"):
+        if not st.session_state["agent_script"]: st.error("شغّل وكيل السيناريو أولاً.")
+        else:
+            try:
+                with st.spinner("كيصاوب الصوت..."):
+                    st.session_state["agent_voice"] = agent_create_voiceover_bytes(st.session_state["agent_script"], team_language)
+                st.success("الصوت واجد.")
+            except Exception as exc: st.error("وكيل الصوت: " + str(exc)[:1400])
+    if st.session_state["agent_voice"]:
+        st.audio(st.session_state["agent_voice"], format="audio/mp3")
+        st.download_button("تحميل التعليق الصوتي MP3", st.session_state["agent_voice"], "voiceover.mp3", "audio/mpeg")
+
+with st.expander("5️⃣ وكيل المونتاج"):
+    st.write("كيجمع الفيديوهات المرخصة أو الفيديوهات اللي رفعتَها مع التعليق الصوتي، وكيخرج MP4.")
+    if st.button("شغّل وكيل المونتاج", key="run_editor"):
+        if not st.session_state["agent_script"]: st.error("خاص السيناريو أولاً.")
+        elif not st.session_state["agent_voice"]: st.error("خاص التعليق الصوتي أولاً.")
+        else:
+            try:
+                with st.spinner("كيحوّل ويركب المقاطع..."):
+                    video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_script"], st.session_state["agent_clips"], team_duration, team_language, team_source_videos, st.session_state["agent_voice"])
+                st.session_state["agent_video"] = video
+                st.session_state["team_used_clips"] = used
+                st.session_state["team_edit_note"] = note
+                st.success("المونتاج واجد.")
+            except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
+    if st.session_state["agent_video"]:
+        st.video(st.session_state["agent_video"])
+        st.download_button("تحميل الفيديو MP4", st.session_state["agent_video"], "MY_AI_AGENT_video.mp4", "video/mp4")
+
+with st.expander("6️⃣ وكيل التحقق"):
+    st.write("كيختبر ملف MP4 ومدته، ويراجع السيناريو إذا كانت خدمة Gemini متاحة.")
+    if st.button("شغّل وكيل التحقق", key="run_verify"):
+        if not st.session_state["agent_video"]: st.error("خاص الفيديو النهائي أولاً.")
+        else:
+            try:
+                with st.spinner("كيتحقق من الفيديو..."):
+                    st.session_state["agent_verify"] = agent_verify_output(st.session_state["agent_video"], st.session_state["agent_script"], team_duration, GEMINI_API_KEY)
+                st.success("التحقق سالا.")
+                st.write(st.session_state["agent_verify"])
+            except Exception as exc: st.error("وكيل التحقق: " + str(exc)[:1500])
+
+if st.button("🚀 شغّل الفريق كامل بالترتيب", type="primary", use_container_width=True, key="run_all_agents"):
+    if agent_ready():
         try:
-            topic = team_topic.strip()
-            progress = st.progress(0, text="Agent 1/5 — كيقلب فالمحتوى العمومي والشبكات...")
-            stage = "البحث عن المحتوى والفيديوهات"
-            social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY, OPENROUTER_API_KEY)
-            progress.progress(20, text="Agent 2/5 — كيكتب السيناريو...")
-            stage = "كتابة السيناريو"
-            draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
-            progress.progress(40, text="Agent 3/5 — كينشئ التعليق الصوتي...")
-            stage = "إنشاء التعليق الصوتي"
-            progress.progress(60, text="Agent 4/5 — كيركب الفيديو وكيضبط المدة...")
-            stage = "تحميل وتحويل وتركيب مقاطع الفيديو"
-            video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language, team_source_videos)
-            progress.progress(85, text="Agent 5/5 — كيتحقق من الفيديو والسيناريو...")
-            stage = "التحقق من الفيديو النهائي"
-            verification = agent_verify_output(video_bytes, draft, team_duration, GEMINI_API_KEY)
-            progress.progress(100, text="سالاو الوكلاء الخمسة.")
-            st.session_state["team_video"] = video_bytes
-            st.session_state["team_script"] = draft
-            st.session_state["team_research"] = social_results
-            st.session_state["team_clips"] = candidate_clips
-            st.session_state["team_used_clips"] = used_clips
-            st.session_state["team_edit_note"] = edit_note
-            st.session_state["team_verification"] = verification
-            st.session_state["team_topic"] = topic
-            st.success("تم إنشاء ملف فيديو. راجع بنفسك اللقطات والمصادر قبل النشر؛ اختيار أفضل لحظات المباراة بالتحليل البصري ما زال غير مفعّل.")
-        except Exception as team_error:
-            st.error("توقفت المهمة في المرحلة: " + stage)
-            st.code(str(team_error)[:1800])
+            progress = st.progress(0, text="1/6 — البحث...")
+            research, clips = agent_social_scout(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+            st.session_state["agent_research"], st.session_state["agent_clips"] = research, clips
+            progress.progress(1/6, text="2/6 — السيناريو...")
+            script = agent_write_script(team_topic.strip(), research, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
+            st.session_state["agent_script"] = script
+            progress.progress(2/6, text="3/6 — التعليق الصوتي...")
+            voice = agent_create_voiceover_bytes(script, team_language)
+            st.session_state["agent_voice"] = voice
+            progress.progress(3/6, text="4/6 — المونتاج...")
+            video, used, note = agent_edit_video(team_topic.strip(), script, clips, team_duration, team_language, team_source_videos, voice)
+            st.session_state["agent_video"] = video
+            st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
+            progress.progress(5/6, text="5/6 — التحقق...")
+            verification = agent_verify_output(video, script, team_duration, GEMINI_API_KEY)
+            st.session_state["agent_verify"] = verification
+            progress.progress(1.0, text="6/6 — اكتمل الفريق.")
+            st.success("الفريق كمل. راجع المحتوى وحقوق الاستعمال قبل النشر.")
+        except Exception as exc:
+            st.error("توقف الفريق: " + str(exc)[:1800])
+
+if st.session_state["agent_verify"]:
+    st.markdown("**نتيجة التحقق:**")
+    st.write(st.session_state["agent_verify"])
 
 if st.session_state.get("team_video"):
     st.markdown("### 🎬 الفيديو الناتج")
