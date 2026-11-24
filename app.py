@@ -708,7 +708,7 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
                     if finish_reason != "length":
                         return cleaned
                     errors.append("OpenRouter المحاولة " + str(attempt_no) + " تقطعات بسبب حد طول الإجابة")
-                    if re.search(r"[.!؟؟][\\"'»)]?\\s*$", cleaned) and re.search(r"(?i)NARRATION|التعليق الصوتي|النص", cleaned):
+                    if re.search(r"[.!؟]\s*$", cleaned) and re.search(r"(?i)NARRATION|التعليق الصوتي|النص", cleaned):
                         if attempt_no == len(attempts):
                             return cleaned
                 else:
