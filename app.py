@@ -59,7 +59,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    model = st.selectbox("AI model", ["gemini-2.5-flash", "gemini-2.0-flash"])
+    model = st.selectbox("AI model", ["gemini-3.8-flash"])
     mode = st.selectbox(
         "Assistant mode",
         ["General assistant", "Writing", "Programming", "Study & explanation", "Ideas & content"],
