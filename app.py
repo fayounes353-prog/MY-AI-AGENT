@@ -552,15 +552,33 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
     return downloaded
 
 
-def agent_edit_video(topic, script, clips, target_seconds, language):
+def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_sources=None):
     """Assemble reusable video clips, add narration and render a vertical MP4."""
     with tempfile.TemporaryDirectory() as temp_dir:
         voice_path = agent_voiceover(script, language, temp_dir)
         usable = agent_download_cc_videos(clips, temp_dir)
+        # User-provided footage is a reliable alternative when social platforms block downloads.
+        for upload_index, uploaded in enumerate(uploaded_sources or []):
+            try:
+                safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded.name)
+                ext = os.path.splitext(safe_name)[1].lower()
+                if ext not in (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"):
+                    continue
+                source_path = os.path.join(temp_dir, f"user_source_{upload_index}{ext}")
+                with open(source_path, "wb") as source_file:
+                    source_file.write(uploaded.getvalue())
+                if os.path.getsize(source_path) > 0:
+                    usable.append({"path": source_path, "title": uploaded.name,
+                                   "license": "Provided by user", "artist": "User supplied",
+                                   "page": "User upload"})
+            except Exception:
+                continue
         if not usable:
-            # Honest fallback: existing renderer uses sourced still images, not stolen social clips.
-            fallback_bytes = build_vertical_video(topic, script, language=language)
-            return fallback_bytes, [], "ما تلقاوش فيديوهات بترخيص واضح قابلة للدمج؛ استعملنا صوراً مرئية مع الصوت كحل بديل."
+            raise RuntimeError(
+                "ما تلقيناش فيديوهات قابلة للاستعمال. البحث جاب روابط فقط، والمنصات ما كتسمحش دائماً بالتنزيل. "
+                "حمّل فيديو عندك الحق تستعمله من جهازك ورفعه فخانة فيديوهات المصدر، ثم عاود التشغيل. "
+                "ما غاديش نصاوبو صور ونقدموها على أنها مونتاج فيديوهات حقيقية."
+            )
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         per_clip = max(3.0, float(target_seconds) / len(usable))
         segment_paths = []
@@ -714,6 +732,12 @@ team_topic = st.text_input("شنو الموضوع أو الفكرة؟", placehol
 team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
 team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
 team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية")
+team_source_videos = st.file_uploader(
+    "فيديوهات المصدر (اختياري ولكن ضروري إذا ما لقاوش الوكلاء ملفات مرخّصة)",
+    type=["mp4", "mov", "m4v", "webm", "mkv", "avi"],
+    accept_multiple_files=True,
+    help="ارفع فيديوهات تملك حق استعمالها. الوكلاء سيستعملونها بدل الاكتفاء بروابط الشبكات الاجتماعية."
+)
 if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", use_container_width=True):
     if not team_topic.strip():
         st.warning("كتب الموضوع أولاً.")
@@ -728,7 +752,7 @@ if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", u
             draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY)
             progress.progress(40, text="Agent 3/5 — كينشئ التعليق الصوتي...")
             progress.progress(60, text="Agent 4/5 — كيركب الفيديو وكيضبط المدة...")
-            video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language)
+            video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language, team_source_videos)
             progress.progress(85, text="Agent 5/5 — كيتحقق من الفيديو والسيناريو...")
             verification = agent_verify_output(video_bytes, draft, team_duration, GEMINI_API_KEY)
             progress.progress(100, text="سالاو الوكلاء الخمسة.")
@@ -740,7 +764,7 @@ if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", u
             st.session_state["team_edit_note"] = edit_note
             st.session_state["team_verification"] = verification
             st.session_state["team_topic"] = topic
-            st.success("الفريق كمل المهمة. راجع الفيديو والمصادر قبل النشر.")
+            st.success("تم إنشاء ملف فيديو. راجع بنفسك اللقطات والمصادر قبل النشر؛ اختيار أفضل لحظات المباراة بالتحليل البصري ما زال غير مفعّل.")
         except Exception as team_error:
             st.error("واحد من الوكلاء ما قدرش يكمل المهمة.")
             st.code(str(team_error)[:1400])
