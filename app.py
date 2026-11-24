@@ -4,6 +4,9 @@ import time
 import json
 import csv
 import io
+import re
+import subprocess
+import tempfile
 import urllib.request
 import streamlit as st
 from google import genai
@@ -11,6 +14,11 @@ from google.genai import types
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook
+from PIL import Image, ImageDraw, ImageFont
+from gtts import gTTS
+import imageio_ffmpeg
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 st.set_page_config(page_title="MY AI AGENT", page_icon="🤖", layout="centered")
 
@@ -41,6 +49,112 @@ def extract_file(uploaded):
                 chunks.append(" | ".join("" if v is None else str(v) for v in row))
         return "\n".join(chunks)
     raise ValueError("نوع الملف غير مدعوم. استعمل PDF أو DOCX أو XLSX أو TXT أو CSV أو MD.")
+
+def rtl(text):
+    try:
+        return get_display(arabic_reshaper.reshape(text))
+    except Exception:
+        return text
+
+def make_video_slide(title, paragraph, output_path, index, total):
+    width, height = 1080, 1920
+    img = Image.new("RGB", (width, height), (8, 19, 39))
+    draw = ImageDraw.Draw(img)
+    # Editorial red/navy visual identity
+    draw.rectangle((0, 0, width, 34), fill=(220, 38, 48))
+    draw.rectangle((70, 150, 1010, 154), fill=(220, 38, 48))
+    try:
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        title_font = ImageFont.truetype(font_path, 66)
+        body_font = ImageFont.truetype(font_path, 54)
+        small_font = ImageFont.truetype(font_path, 34)
+    except Exception:
+        title_font = body_font = small_font = ImageFont.load_default()
+
+    draw.text((width-75, 95), rtl("CHNO WA9E3"), font=title_font, fill=(255,255,255), anchor="ra")
+    draw.text((width-75, 220), rtl("الحقيقة قبل العنوان"), font=small_font, fill=(245,85,90), anchor="ra")
+    draw.rounded_rectangle((70, 390, 1010, 1500), radius=36, fill=(15, 34, 62), outline=(50, 70, 100), width=3)
+
+    # Word-wrap Arabic text, aligned to the right
+    words = paragraph.split()
+    lines, current = [], ""
+    max_width = 820
+    for word in words:
+        candidate = (current + " " + word).strip()
+        shaped = rtl(candidate)
+        if draw.textbbox((0,0), shaped, font=body_font)[2] <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    line_height = 82
+    max_lines = 10
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1] + "…"
+    block_height = len(lines) * line_height
+    y = 945 - block_height // 2
+    for line in lines:
+        draw.text((950, y), rtl(line), font=body_font, fill=(250, 250, 250), anchor="ra")
+        y += line_height
+
+    draw.text((width-75, 1630), rtl(title[:55]), font=small_font, fill=(190,205,225), anchor="ra")
+    draw.rectangle((70, 1760, 1010, 1770), fill=(65,80,105))
+    progress_w = int(940 * (index+1) / max(total,1))
+    draw.rectangle((70, 1760, 70+progress_w, 1770), fill=(220,38,48))
+    draw.text((width//2, 1825), rtl(f"المشهد {index+1} / {total}"), font=small_font, fill=(180,195,215), anchor="mm")
+    img.save(output_path, quality=92)
+
+def build_vertical_video(title, script, language="ar"):
+    paragraphs = [p.strip() for p in re.split(r"(?<=[.!؟])\s+|\n+", script) if p.strip()]
+    if not paragraphs:
+        paragraphs = [script.strip()]
+    # Keep a manageable number of readable scenes
+    scenes = []
+    for p in paragraphs:
+        while len(p) > 260:
+            cut = p.rfind(" ", 0, 240)
+            if cut < 80:
+                cut = 240
+            scenes.append(p[:cut].strip())
+            p = p[cut:].strip()
+        if p:
+            scenes.append(p)
+    scenes = scenes[:10]
+    with tempfile.TemporaryDirectory() as temp_dir:
+        audio_path = os.path.join(temp_dir, "voice.mp3")
+        tts = gTTS(text=script, lang=language, slow=False)
+        tts.save(audio_path)
+
+        concat_path = os.path.join(temp_dir, "slides.txt")
+        slide_paths = []
+        durations = [max(3.0, len(s) / 7.0 + 1.5) for s in scenes]
+        with open(concat_path, "w", encoding="utf-8") as listing:
+            for i, scene in enumerate(scenes):
+                slide_path = os.path.join(temp_dir, f"slide_{i:02d}.jpg")
+                make_video_slide(title, scene, slide_path, i, len(scenes))
+                slide_paths.append(slide_path)
+                listing.write(f"file '{slide_path}'\n")
+                listing.write(f"duration {durations[i]:.2f}\n")
+            listing.write(f"file '{slide_paths[-1]}'\n")
+
+        output_path = os.path.join(temp_dir, "chno_wa9e3_video.mp4")
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [
+            ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
+            "-i", audio_path, "-vf", "scale=1080:1920,format=yuv420p",
+            "-c:v", "libx264", "-preset", "ultrafast", "-r", "24",
+            "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart",
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or "FFmpeg error")[-1800:])
+        with open(output_path, "rb") as video_file:
+            return video_file.read()
 
 APP_PASSWORD = get_secret("APP_PASSWORD")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
@@ -77,7 +191,7 @@ if not st.session_state.authenticated:
 
 st.markdown('<div class="hero">', unsafe_allow_html=True)
 st.title("🤖 MY AI AGENT")
-st.caption("مساعدك الذكي — كيساعدك تنجز المهام، يحلل الملفات ويكتب المحتوى")
+st.caption("مساعدك الذكي — كيساعدك تنجز المهام، يحلل الملفات ويصاوب الفيديوهات")
 st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -113,6 +227,37 @@ with st.sidebar:
         st.rerun()
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
+
+st.subheader("🎬 CHNO WA9E3 — Video Studio")
+st.caption("حوّل النص إلى فيديو عمودي 9:16 بصوت عربي، جاهز للتحميل والنشر.")
+video_title = st.text_input("عنوان الفيديو", value="أهم أخبار اليوم")
+video_script = st.text_area(
+    "النص اللي غادي يتقال فالفيديو",
+    height=220,
+    placeholder="كتب أو لصق هنا النص النهائي للفيديو. كل فقرة أو جملة غادي تولّي مشهد..."
+)
+if st.button("🎥 صايب الفيديو", type="primary", use_container_width=True):
+    if len(video_script.strip()) < 40:
+        st.warning("زيد النص شوية؛ خاص على الأقل 40 حرف.")
+    else:
+        try:
+            with st.spinner("كنصاوب الفيديو والصوت... خليه مفتوح حتى يسالي"):
+                video_bytes = build_vertical_video(video_title.strip() or "CHNO WA9E3", video_script.strip())
+            st.session_state["generated_video"] = video_bytes
+            st.success("الفيديو واجد!")
+        except Exception as e:
+            st.error("ما قدرناش نصاوبو الفيديو هاد المرة.")
+            st.code(str(e)[:1800])
+if st.session_state.get("generated_video"):
+    st.video(st.session_state["generated_video"])
+    st.download_button(
+        "⬇️ حمّل الفيديو MP4",
+        data=st.session_state["generated_video"],
+        file_name="CHNO_WA9E3_video.mp4",
+        mime="video/mp4",
+        use_container_width=True
+    )
+st.caption("هاد النسخة كتنتج فيديو من النص بصوت آلي وتصميم CHNO WA9E3. النشر التلقائي للحسابات غادي نربطوه فمرحلة لاحقة.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -160,7 +305,7 @@ if question:
             "analyze provided data, produce code, calculations, plans, or structured results. "
             "For attached files, rely on their contents and mention if extraction appears incomplete. "
             "Be honest: never claim to have sent messages, changed accounts, made purchases, or "
-            "performed actions outside this app unless a connected tool actually completed them. "
+            "performed actions outside this app unless a connected tool actually completed it. "
             "Ask for confirmation before any consequential external action."
         )
         history = []
