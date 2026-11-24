@@ -56,11 +56,68 @@ def rtl(text):
     except Exception:
         return text
 
-def make_video_slide(title, paragraph, output_path, index, total):
+def find_visual_image(query, temp_dir, index):
+    """Find a reusable visual from Wikimedia Commons; fall back cleanly if unavailable."""
+    try:
+        params = urllib.parse.urlencode({
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": query + " filetype:bitmap",
+            "gsrnamespace": 6,
+            "gsrlimit": 8,
+            "prop": "imageinfo",
+            "iiprop": "url|extmetadata",
+            "iiurlwidth": 1200,
+            "format": "json"
+        })
+        req = urllib.request.Request(
+            "https://commons.wikimedia.org/w/api.php?" + params,
+            headers={"User-Agent": "MYAIAgentVideoStudio/1.0 (educational video creator)"}
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        pages = list(payload.get("query", {}).get("pages", {}).values())
+        for page in pages:
+            info = (page.get("imageinfo") or [{}])[0]
+            url = info.get("thumburl") or info.get("url")
+            if not url:
+                continue
+            ext = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+            if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                continue
+            image_req = urllib.request.Request(
+                url, headers={"User-Agent": "MYAIAgentVideoStudio/1.0"}
+            )
+            with urllib.request.urlopen(image_req, timeout=20) as image_response:
+                raw = image_response.read()
+            image = Image.open(io.BytesIO(raw)).convert("RGB")
+            image.thumbnail((1400, 2200))
+            path = os.path.join(temp_dir, f"visual_{index:02d}.jpg")
+            image.save(path, quality=90)
+            return path
+    except Exception:
+        pass
+    return None
+
+
+def make_video_slide(title, paragraph, output_path, index, total, image_path=None):
     width, height = 1080, 1920
-    img = Image.new("RGB", (width, height), (8, 19, 39))
+    if image_path:
+        try:
+            source = Image.open(image_path).convert("RGB")
+            sw, sh = source.size
+            scale = max(width / sw, height / sh)
+            source = source.resize((int(sw * scale), int(sh * scale)), Image.Resampling.LANCZOS)
+            left = (source.width - width) // 2
+            top = (source.height - height) // 2
+            img = source.crop((left, top, left + width, top + height))
+            shade = Image.new("RGBA", (width, height), (3, 12, 28, 155))
+            img = Image.alpha_composite(img.convert("RGBA"), shade).convert("RGB")
+        except Exception:
+            img = Image.new("RGB", (width, height), (8, 19, 39))
+    else:
+        img = Image.new("RGB", (width, height), (8, 19, 39))
     draw = ImageDraw.Draw(img)
-    # Editorial red/navy visual identity
     draw.rectangle((0, 0, width, 34), fill=(220, 38, 48))
     draw.rectangle((70, 150, 1010, 154), fill=(220, 38, 48))
     try:
@@ -72,13 +129,12 @@ def make_video_slide(title, paragraph, output_path, index, total):
         title_font = body_font = small_font = ImageFont.load_default()
 
     draw.text((width-75, 95), rtl("CHNO WA9E3"), font=title_font, fill=(255,255,255), anchor="ra")
-    draw.text((width-75, 220), rtl("الحقيقة قبل العنوان"), font=small_font, fill=(245,85,90), anchor="ra")
-    draw.rounded_rectangle((70, 390, 1010, 1500), radius=36, fill=(15, 34, 62), outline=(50, 70, 100), width=3)
+    draw.text((width-75, 220), rtl("الحقيقة قبل العنوان"), font=small_font, fill=(255,105,105), anchor="ra")
+    draw.rounded_rectangle((55, 390, 1025, 1510), radius=36, fill=(5, 16, 34, 205), outline=(220,38,48), width=3)
 
-    # Word-wrap Arabic text, aligned to the right
     words = paragraph.split()
     lines, current = [], ""
-    max_width = 820
+    max_width = 840
     for word in words:
         candidate = (current + " " + word).strip()
         shaped = rtl(candidate)
@@ -98,21 +154,21 @@ def make_video_slide(title, paragraph, output_path, index, total):
     block_height = len(lines) * line_height
     y = 945 - block_height // 2
     for line in lines:
-        draw.text((950, y), rtl(line), font=body_font, fill=(250, 250, 250), anchor="ra")
+        draw.text((950, y), rtl(line), font=body_font, fill=(255,255,255), anchor="ra")
         y += line_height
 
-    draw.text((width-75, 1630), rtl(title[:55]), font=small_font, fill=(190,205,225), anchor="ra")
+    draw.text((width-75, 1630), rtl(title[:55]), font=small_font, fill=(225,235,248), anchor="ra")
     draw.rectangle((70, 1760, 1010, 1770), fill=(65,80,105))
     progress_w = int(940 * (index+1) / max(total,1))
     draw.rectangle((70, 1760, 70+progress_w, 1770), fill=(220,38,48))
-    draw.text((width//2, 1825), rtl(f"المشهد {index+1} / {total}"), font=small_font, fill=(180,195,215), anchor="mm")
+    draw.text((width//2, 1825), rtl(f"المشهد {index+1} / {total}"), font=small_font, fill=(220,230,245), anchor="mm")
     img.save(output_path, quality=92)
+
 
 def build_vertical_video(title, script, language="ar"):
     paragraphs = [p.strip() for p in re.split(r"(?<=[.!؟])\s+|\n+", script) if p.strip()]
     if not paragraphs:
         paragraphs = [script.strip()]
-    # Keep a manageable number of readable scenes
     scenes = []
     for p in paragraphs:
         while len(p) > 260:
@@ -123,7 +179,10 @@ def build_vertical_video(title, script, language="ar"):
             p = p[cut:].strip()
         if p:
             scenes.append(p)
-    scenes = scenes[:10]
+    scenes = scenes[:8]
+    if not scenes:
+        raise ValueError("كتب نص الفيديو أولا.")
+
     with tempfile.TemporaryDirectory() as temp_dir:
         audio_path = os.path.join(temp_dir, "voice.mp3")
         tts = gTTS(text=script, lang=language, slow=False)
@@ -131,12 +190,17 @@ def build_vertical_video(title, script, language="ar"):
 
         concat_path = os.path.join(temp_dir, "slides.txt")
         slide_paths = []
-        durations = [max(3.0, len(s) / 7.0 + 1.5) for s in scenes]
+        durations = [max(4.0, len(s) / 6.0 + 2.0) for s in scenes]
+        for i, scene in enumerate(scenes):
+            # Search for a related freely reusable visual on Wikimedia Commons.
+            visual_query = " ".join(scene.split()[:7])
+            visual_path = find_visual_image(visual_query, temp_dir, i)
+            slide_path = os.path.join(temp_dir, f"slide_{i:02d}.jpg")
+            make_video_slide(title, scene, slide_path, i, len(scenes), visual_path)
+            slide_paths.append(slide_path)
+
         with open(concat_path, "w", encoding="utf-8") as listing:
-            for i, scene in enumerate(scenes):
-                slide_path = os.path.join(temp_dir, f"slide_{i:02d}.jpg")
-                make_video_slide(title, scene, slide_path, i, len(scenes))
-                slide_paths.append(slide_path)
+            for i, slide_path in enumerate(slide_paths):
                 listing.write(f"file '{slide_path}'\n")
                 listing.write(f"duration {durations[i]:.2f}\n")
             listing.write(f"file '{slide_paths[-1]}'\n")
@@ -145,12 +209,13 @@ def build_vertical_video(title, script, language="ar"):
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         cmd = [
             ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
-            "-i", audio_path, "-vf", "scale=1080:1920,format=yuv420p",
+            "-i", audio_path,
+            "-vf", "zoompan=z='min(zoom+0.00035,1.07)':d=1:s=1080x1920:fps=24,format=yuv420p",
             "-c:v", "libx264", "-preset", "ultrafast", "-r", "24",
             "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart",
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             raise RuntimeError((result.stderr or "FFmpeg error")[-1800:])
         with open(output_path, "rb") as video_file:
