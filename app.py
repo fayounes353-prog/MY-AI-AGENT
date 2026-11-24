@@ -176,33 +176,68 @@ def search_anything_rss(query):
     return "\n".join(lines)
 
 
-def search_anything_on_web(query, api_key=""):
-    """Try grounded Gemini search; fall back to RSS when Gemini is unavailable or quota-limited."""
+def search_anything_on_web(query, api_key="", openrouter_api_key=""):
+    """Search with Gemini grounding, then OpenRouter web search, then Google News RSS."""
+    prompt = (
+        "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\\n"
+        "اعثر على صفحات ومصادر حقيقية وحديثة، بما فيها صفحات الفيديو والمنشورات العامة ذات الصلة. "
+        "أرجع خلاصة وروابط أصلية، ولا تخترع نتائج أو أرقام تفاعل، ونبّه إلى حقوق إعادة الاستعمال."
+    )
+    errors = []
     if api_key:
         try:
             client = genai.Client(api_key=api_key)
-            prompt = (
-                "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\n"
-                "استعمل Google Search للعثور على صفحات ومصادر حقيقية وحديثة. "
-                "ابحث عن المصادر الأصلية والصفحات والصور أو الفيديوهات ذات الصلة بحسب طبيعة الموضوع، "
-                "ولا تفترض أن كل طلب يتعلق بلعبة أو فيلم أو خبر. "
-                "أجب بلغة المستخدم، وقدم خلاصة واضحة ثم روابط المصادر التي عثرت عليها. "
-                "فرّق بين المعلومة المؤكدة والإشاعة، ولا تخترع روابط أو نتائج."
-            )
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
                 config={
-                    "system_instruction": "أنت وكيل بحث على الإنترنت. ابحث قبل الإجابة، واستشهد بمصادر وروابط حقيقية.",
+                    "system_instruction": "أنت وكيل بحث على الإنترنت. استعمل البحث الفعلي واستشهد بروابط حقيقية.",
                     "tools": [types.Tool(google_search=types.GoogleSearch())],
                 },
             )
             if response.text and response.text.strip():
                 return response.text.strip()
-        except Exception as gemini_error:
-            fallback = search_anything_rss(query)
-            return fallback + "\n\nملاحظة تقنية: تعذر البحث الذكي مؤقتاً، لذلك استعملت البحث الإخباري المباشر."
-    return search_anything_rss(query)
+            errors.append("Gemini رجع نتيجة فارغة")
+        except Exception as exc:
+            errors.append("Gemini: " + str(exc)[:350])
+    if openrouter_api_key:
+        try:
+            payload = json.dumps({
+                "model": "openrouter/free:online",
+                "messages": [
+                    {"role": "system", "content": "You are a web research agent. Browse the web, prioritize primary sources and public video pages. Return real source URLs and never invent results."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 2200
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                "https://openrouter.ai/api/v1/chat/completions",
+                data=payload,
+                headers={"Authorization": "Bearer " + openrouter_api_key, "Content-Type": "application/json",
+                         "HTTP-Referer": "https://my-ai-agent-fdypqn9sqseempebgo82yf.streamlit.app",
+                         "X-Title": "MY AI AGENT"},
+                method="POST"
+            )
+            with urllib.request.urlopen(request, timeout=75) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            choices = data.get("choices") or []
+            result = choices[0].get("message", {}).get("content", "") if choices else ""
+            if isinstance(result, list):
+                result = "\\n".join(part.get("text", "") for part in result if isinstance(part, dict))
+            if result and str(result).strip():
+                return str(result).strip()
+            errors.append("OpenRouter رجع نتيجة فارغة")
+        except Exception as exc:
+            errors.append("OpenRouter: " + str(exc)[:500])
+    try:
+        return search_anything_rss(query) + "\\n\\nملاحظة: استُعمل بحث Google News RSS كحل احتياطي."
+    except Exception as exc:
+        errors.append("RSS: " + str(exc)[:500])
+    return (
+        "تعذر الوصول إلى نتائج البحث الخارجية في هذه المحاولة. "
+        "لم نخترع روابط أو نتائج. تفاصيل التشخيص: " + " | ".join(errors)
+    )
 
 
 def make_video_slide(title, paragraph, output_path, index, total, image_path=None):
@@ -455,7 +490,7 @@ def build_vertical_video(title, script, language="ar"):
             return video_file.read()
 
 
-def agent_social_scout(topic, api_key, limit=8):
+def agent_social_scout(topic, api_key, openrouter_api_key="", limit=8):
     """Scout public web-indexed social posts and separately find reusable video footage."""
     social_query = (
         "ابحث عن محتوى عام منشور حول: " + topic + ". "
@@ -465,7 +500,7 @@ def agent_social_scout(topic, api_key, limit=8):
         "وفرّق بين المحتوى الرائج والمحتوى الموثوق. لا تدّعِ أرقام مشاهدات غير ظاهرة. "
         "لا تعتبر أن العثور على فيديو يعني أن حقوق إعادة استعماله متاحة."
     )
-    social_results = search_anything_on_web(social_query, api_key)
+    social_results = search_anything_on_web(social_query, api_key, openrouter_api_key)
     try:
         reusable_clips = search_reusable_video_clips(topic + " video", limit=limit)
     except Exception:
@@ -780,7 +815,7 @@ if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", u
             topic = team_topic.strip()
             progress = st.progress(0, text="Agent 1/5 — كيقلب فالمحتوى العمومي والشبكات...")
             stage = "البحث عن المحتوى والفيديوهات"
-            social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY)
+            social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY, OPENROUTER_API_KEY)
             progress.progress(20, text="Agent 2/5 — كيكتب السيناريو...")
             stage = "كتابة السيناريو"
             draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
