@@ -2,16 +2,17 @@ import os
 import hmac
 import time
 import json
+import csv
+import io
 import urllib.request
 import streamlit as st
 from google import genai
 from google.genai import types
+from pypdf import PdfReader
+from docx import Document
+from openpyxl import load_workbook
 
-st.set_page_config(
-    page_title="MY AI AGENT",
-    page_icon="🤖",
-    layout="centered",
-)
+st.set_page_config(page_title="MY AI AGENT", page_icon="🤖", layout="centered")
 
 def get_secret(name, default=""):
     try:
@@ -19,30 +20,47 @@ def get_secret(name, default=""):
     except Exception:
         return os.getenv(name, default)
 
+def extract_file(uploaded):
+    name = uploaded.name
+    raw = uploaded.getvalue()
+    ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    if ext in ("txt", "md", "csv", "json", "py", "html", "xml", "log"):
+        return raw.decode("utf-8", errors="replace")
+    if ext == "pdf":
+        reader = PdfReader(io.BytesIO(raw))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if ext == "docx":
+        doc = Document(io.BytesIO(raw))
+        return "\n".join(p.text for p in doc.paragraphs)
+    if ext == "xlsx":
+        book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        chunks = []
+        for sheet in book.worksheets:
+            chunks.append(f"Sheet: {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                chunks.append(" | ".join("" if v is None else str(v) for v in row))
+        return "\n".join(chunks)
+    raise ValueError("نوع الملف غير مدعوم. استعمل PDF أو DOCX أو XLSX أو TXT أو CSV أو MD.")
+
 APP_PASSWORD = get_secret("APP_PASSWORD")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 
 st.markdown("""
 <style>
-    .stApp {max-width: 980px; margin: 0 auto;}
-    [data-testid="stChatMessage"] {border-radius: 14px;}
-    .hero {padding: 1.2rem 0 .5rem 0;}
-    .muted {color: #888; font-size: .92rem;}
+.stApp {max-width: 980px; margin: 0 auto;}
+[data-testid="stChatMessage"] {border-radius: 14px;}
+.hero {padding: 1.2rem 0 .5rem 0;}
 </style>
 """, unsafe_allow_html=True)
 
-# Private-site access gate: password is configured in the host's Secrets,
-# never stored in this source file or displayed in the interface.
 if not APP_PASSWORD:
     st.title("🔒 MY AI AGENT — Private access")
-    st.error("الموقع مازال ما تهيّأش: خاص المسؤول يضيف APP_PASSWORD فـ Secrets ديال الاستضافة.")
-    st.info("منين نربطو الموقع بالاستضافة، غادي نضيفو كلمة السر فالإعدادات السرية ديالها. ما تحطّهاش فهاد الملف.")
+    st.error("خاص المسؤول يضيف APP_PASSWORD فـ Secrets ديال الاستضافة.")
     st.stop()
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
-
 if not st.session_state.authenticated:
     st.title("🔐 MY AI AGENT")
     st.caption("Private AI assistant")
@@ -59,7 +77,7 @@ if not st.session_state.authenticated:
 
 st.markdown('<div class="hero">', unsafe_allow_html=True)
 st.title("🤖 MY AI AGENT")
-st.caption("مساعدك الذكي — Your personal AI assistant")
+st.caption("مساعدك الذكي — كيساعدك تنجز المهام، يحلل الملفات ويكتب المحتوى")
 st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -67,17 +85,25 @@ with st.sidebar:
     provider = st.selectbox("AI provider", ["Gemini", "OpenRouter (free models)"])
     if provider == "Gemini":
         model = st.selectbox("AI model", ["gemini-3.5-flash-lite", "gemini-3.8-flash"])
-    else:
-        model = "openrouter/free"
-    mode = st.selectbox(
-        "Assistant mode",
-        ["General assistant", "Writing", "Programming", "Study & explanation", "Ideas & content"],
-    )
-    if provider == "Gemini":
         web_search = st.checkbox("البحث في الإنترنت (Google)", value=False)
     else:
+        model = "openrouter/free"
         web_search = False
-        st.caption("البحث المباشر غير متاح حالياً مع OpenRouter.")
+        st.caption("البحث المباشر متاح حالياً مع Gemini فقط.")
+    mode = st.selectbox("Assistant mode", [
+        "General assistant", "Writing", "Programming",
+        "Study & explanation", "Ideas & content", "Business & accounting"
+    ])
+    st.divider()
+    st.subheader("📎 File analysis")
+    uploaded_files = st.file_uploader(
+        "حمّل ملفات باش نحللها",
+        type=["pdf", "docx", "xlsx", "txt", "csv", "md", "json", "py"],
+        accept_multiple_files=True,
+        help="يمكن تحميل PDF وWord وExcel وTXT وCSV وMarkdown."
+    )
+    if uploaded_files:
+        st.caption(f"{len(uploaded_files)} ملف/ملفات جاهزة للتحليل.")
     if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -86,7 +112,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
     st.divider()
-    st.caption("Private login is enabled. API keys stay private in hosting Secrets.")
+    st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -95,26 +121,47 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-question = st.chat_input("Write what you want the agent to do...")
+if st.session_state.messages:
+    last_assistant = next((m["content"] for m in reversed(st.session_state.messages) if m["role"] == "assistant"), None)
+    if last_assistant:
+        st.download_button("⬇️ Télécharger آخر جواب", data=last_assistant, file_name="my-ai-agent-answer.txt", mime="text/plain")
+
+question = st.chat_input("كتب المهمة اللي بغيتي الوكيل ينجزها...")
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
 
+    attachment_context = ""
+    if uploaded_files:
+        parts = []
+        for uploaded in uploaded_files:
+            try:
+                extracted = extract_file(uploaded)
+                parts.append(f"\n--- FILE: {uploaded.name} ---\n{extracted[:30000]}")
+            except Exception as e:
+                parts.append(f"\n--- FILE: {uploaded.name} ---\nتعذر قراءة الملف: {e}")
+        attachment_context = "\n\nمحتوى الملفات المرفقة (استعمله للإجابة على طلب المستخدم):\n" + "\n".join(parts)
+
+    user_prompt = question + attachment_context
     active_key = GEMINI_API_KEY if provider == "Gemini" else OPENROUTER_API_KEY
     if not active_key:
         secret_name = "GEMINI_API_KEY" if provider == "Gemini" else "OPENROUTER_API_KEY"
-        warning = f"خاص تزيد {secret_name} فـ Secrets ديال الاستضافة باش يخدم هاد المزوّد."
+        warning = f"خاص تزيد {secret_name} فـ Secrets ديال الاستضافة."
         with st.chat_message("assistant"):
             st.warning(warning)
         st.session_state.messages.append({"role": "assistant", "content": warning})
     else:
         system_instruction = (
-            "You are MY AI AGENT, a helpful, honest and practical assistant. "
-            "Reply in the same language as the user. For Moroccan Darija, use clear Moroccan Darija. "
-            f"Current mode: {mode}. Give actionable answers. Never claim you performed an external action "
-            "unless a connected tool actually completed it."
+            "You are MY AI AGENT, a practical task assistant. Reply in the user's language; "
+            "for Moroccan Darija, use clear Moroccan Darija. Current mode: " + mode + ". "
+            "When asked to perform a task, do the work in your answer: draft the complete text, "
+            "analyze provided data, produce code, calculations, plans, or structured results. "
+            "For attached files, rely on their contents and mention if extraction appears incomplete. "
+            "Be honest: never claim to have sent messages, changed accounts, made purchases, or "
+            "performed actions outside this app unless a connected tool actually completed them. "
+            "Ask for confirmation before any consequential external action."
         )
         history = []
         for item in st.session_state.messages[:-1]:
@@ -122,10 +169,10 @@ if question:
                 "role": "user" if item["role"] == "user" else "model",
                 "parts": [{"text": item["content"]}],
             })
-        history.append({"role": "user", "parts": [{"text": question}]})
+        history.append({"role": "user", "parts": [{"text": user_prompt}]})
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
+            with st.spinner("الوكيل كينفذ المهمة..."):
                 try:
                     if provider == "Gemini":
                         client = genai.Client(api_key=GEMINI_API_KEY)
@@ -135,13 +182,9 @@ if question:
                             try:
                                 request_config = {"system_instruction": system_instruction}
                                 if web_search:
-                                    request_config["tools"] = [
-                                        types.Tool(google_search=types.GoogleSearch())
-                                    ]
+                                    request_config["tools"] = [types.Tool(google_search=types.GoogleSearch())]
                                 response = client.models.generate_content(
-                                    model=model,
-                                    contents=history,
-                                    config=request_config,
+                                    model=model, contents=history, config=request_config
                                 )
                                 break
                             except Exception as e:
@@ -155,16 +198,15 @@ if question:
                         answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
                     else:
                         messages = [{"role": "system", "content": system_instruction}]
-                        for item in st.session_state.messages:
+                        for item in st.session_state.messages[:-1]:
                             messages.append({
                                 "role": "assistant" if item["role"] == "assistant" else "user",
                                 "content": item["content"],
                             })
+                        messages.append({"role": "user", "content": user_prompt})
                         payload = json.dumps({
-                            "model": model,
-                            "messages": messages,
-                            "temperature": 0.7,
-                            "max_tokens": 2048,
+                            "model": model, "messages": messages,
+                            "temperature": 0.7, "max_tokens": 3000,
                         }).encode("utf-8")
                         req = urllib.request.Request(
                             "https://openrouter.ai/api/v1/chat/completions",
@@ -185,5 +227,5 @@ if question:
                 except Exception as e:
                     safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
                     safe_error = safe_error.replace(OPENROUTER_API_KEY, "[API KEY HIDDEN]")
-                    st.error(f"وقع مشكل فالربط مع {provider}. تفاصيل الخطأ:")
+                    st.error(f"وقع مشكل فالربط مع {provider}.")
                     st.code(safe_error[:1500])
