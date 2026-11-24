@@ -657,28 +657,36 @@ def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_so
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         per_clip = max(3.0, float(target_seconds) / len(usable))
         segment_paths = []
+        conversion_errors = []
         for idx, clip in enumerate(usable):
             segment = os.path.join(temp_dir, "segment_" + str(idx) + ".mp4")
-            cmd = [ffmpeg, "-y", "-stream_loop", "-1", "-i", clip["path"], "-t", str(per_clip),
-                   "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p",
-                   "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-r", "30", segment]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-            if result.returncode == 0 and os.path.exists(segment):
-                segment_paths.append(segment)
+            cmd = [ffmpeg, "-y", "-i", clip["path"], "-t", str(per_clip),
+                   "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p",
+                   "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-r", "30",
+                   "-movflags", "+faststart", segment]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+                if result.returncode == 0 and os.path.exists(segment) and os.path.getsize(segment) > 10000:
+                    segment_paths.append(segment)
+                else:
+                    conversion_errors.append(str(clip.get("title", "clip")) + ": " + (result.stderr or "FFmpeg لم ينشئ ملفاً صالحاً")[-650:])
+            except Exception as exc:
+                conversion_errors.append(str(clip.get("title", "clip")) + ": " + str(exc)[:350])
         if not segment_paths:
-            raise RuntimeError(
-                "لقينا مصادر فيديو ولكن FFmpeg ما قدرش يحولها لمقاطع قابلة للمونتاج. "
-                "ما خرجناش عرض صور على أنه فيديو حقيقي. جرّب فيديو MP4 آخر أو ملف مصدر مختلف."
-            )
+            details = " | ".join(conversion_errors[:3])
+            raise RuntimeError("فشل تحويل جميع مصادر الفيديو إلى MP4. تأكد أن الملفات فيديو فعلي وليست روابط/ملفات تالفة. تفاصيل FFmpeg: " + details)
         listing = os.path.join(temp_dir, "concat.txt")
-        with open(listing, "w", encoding="utf-8") as f:
+        with open(listing, "w", encoding="utf-8") as listing_file:
             for path in segment_paths:
-                f.write("file '" + path.replace("'", "'\''") + "'\n")
+                escaped_path = path.replace("'", "'\\''")
+                listing_file.write("file '" + escaped_path + "'\\n")
         silent_video = os.path.join(temp_dir, "silent.mp4")
         joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
-                                 "-c", "copy", silent_video], capture_output=True, text=True, timeout=180)
-        if joined.returncode != 0:
-            raise RuntimeError("فشل تجميع مقاطع الفيديو: " + (joined.stderr or "")[-500:])
+                                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                                 "-pix_fmt", "yuv420p", "-an", silent_video],
+                                capture_output=True, text=True, timeout=240)
+        if joined.returncode != 0 or not os.path.exists(silent_video) or os.path.getsize(silent_video) < 10000:
+            raise RuntimeError("فشل تجميع مقاطع الفيديو بعد التحويل: " + (joined.stderr or "")[-1100:])
         output = os.path.join(temp_dir, "final.mp4")
         rendered = subprocess.run([ffmpeg, "-y", "-i", silent_video, "-i", voice_path,
                                    "-t", str(int(target_seconds)),
