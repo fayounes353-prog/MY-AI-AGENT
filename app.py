@@ -184,8 +184,8 @@ def search_anything_on_web(query, api_key=""):
             prompt = (
                 "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\n"
                 "استعمل Google Search للعثور على صفحات ومصادر حقيقية وحديثة. "
-                "إذا كان الموضوع لعبة أو فيلم أو فيديو، ابحث كذلك عن المقطع الرسمي، "
-                "الموقع الرسمي، الأخبار، والمصادر المفيدة. "
+                "ابحث عن المصادر الأصلية والصفحات والصور أو الفيديوهات ذات الصلة بحسب طبيعة الموضوع، "
+                "ولا تفترض أن كل طلب يتعلق بلعبة أو فيلم أو خبر. "
                 "أجب بلغة المستخدم، وقدم خلاصة واضحة ثم روابط المصادر التي عثرت عليها. "
                 "فرّق بين المعلومة المؤكدة والإشاعة، ولا تخترع روابط أو نتائج."
             )
@@ -353,22 +353,22 @@ def research_with_openrouter_rss(topic, api_key):
 
 
 def research_and_write_script(topic, api_key, model):
-    """Use web-grounded Gemini research to draft a short Arabic news video script."""
+    """Research any user-provided topic and draft a source-grounded video script."""
     client = genai.Client(api_key=api_key)
     prompt = (
-        "ابحث في الويب عن آخر المعلومات الموثوقة حول الموضوع التالي: " + topic + "\n"
-        "اكتب سيناريو فيديو عربي قصير لقناة CHNO WA9E3 مدته 45 إلى 60 ثانية. "
-        "استعمل معلومات حديثة فقط إذا وجدت مصادر موثوقة، وميّز بين المؤكد وغير المؤكد. "
-        "رتّب الإجابة هكذا: سطر أول يبدأ بعنوان: ثم عنوان قصير؛ بعده نص التعليق الصوتي في 5 إلى 7 جمل قصيرة؛ "
-        "ثم فقرة مستقلة بعنوان المصادر تحتوي روابط أو أسماء المصادر. "
-        "لا تخترع أرقاما أو تصريحات، ولا تضع المصادر داخل نص التعليق الصوتي. "
-        "لا تنقل نصوصا محمية ولا تعِد نشر فيديوهات الآخرين."
+        "ابحث في الويب عن الموضوع الذي طلبه المستخدم: " + topic + "\\n"
+        "أنشئ سيناريو فيديو عربي جذاباً مدته تقريباً 60 إلى 90 ثانية، بما يناسب طبيعة الموضوع: "
+        "شرح أو قصة أو مراجعة أو تعليم أو تقنية أو رياضة أو سفر أو ثقافة أو أخبار أو غير ذلك. "
+        "لا تفترض أن الموضوع خبر أو لعبة أو فيلم؛ اختر الزاوية المناسبة له. "
+        "استعمل مصادر موثوقة وحديثة عندما تكون الحداثة مهمة، وميّز بين الحقائق والآراء والادعاءات. "
+        "رتّب الإجابة هكذا: عنوان قصير، مقدمة مشوقة، نص التعليق الصوتي، ثم فقرة مستقلة بعنوان المصادر بروابط حقيقية. "
+        "لا تخترع معلومات أو روابط، ولا تضع المصادر داخل نص التعليق الصوتي. احترم حقوق النشر."
     )
     response = client.models.generate_content(
         model=model,
         contents=prompt,
         config={
-            "system_instruction": "أنت محرر أخبار دقيق. تحقق من الوقائع واستعمل البحث في الويب.",
+            "system_instruction": "أنت فريق بحث وتحرير وصناعة محتوى متعدد التخصصات. تعامل مع أي موضوع يكتبه المستخدم، ولا تحصر نفسك في الأخبار.",
             "tools": [types.Tool(google_search=types.GoogleSearch())],
         },
     )
@@ -527,8 +527,8 @@ with st.sidebar:
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
 st.subheader("🧠 Agent Team — كتب الموضوع وخلي الوكلاء يخدمو")
-st.caption("كتب غير الموضوع (مثلاً GTA 6). الوكلاء كيقلبو على الأخبار والمصادر، كيجمعو روابط الفيديوهات والمواد المرئية، كيكتبو السيناريو، كيديرو الترجمة/التعليق الصوتي، وكيخرجو MP4 للمراجعة.")
-team_topic = st.text_input("الموضوع", placeholder="مثلاً: GTA 6")
+st.caption("كتب أي موضوع بغيتي: علم، تاريخ، رياضة، ألعاب، أفلام، طبخ، سفر، أخبار، تعليم أو غيرها. الفريق كيبحت حسب طبيعة الموضوع، كيختار الزاوية المناسبة، كيكتب السيناريو، كيترجم، كينشئ التعليق الصوتي وكيخرج MP4 للمراجعة.")
+team_topic = st.text_input("الموضوع", placeholder="مثلاً: أي موضوع بغيتي...")
 team_language = st.selectbox("لغة الفيديو", ["العربية", "Français", "English"], index=0, key="team_language")
 if st.button("🚀 شغّل جميع الوكلاء وصايب الفيديو", type="primary", use_container_width=True):
     if not team_topic.strip():
@@ -538,8 +538,8 @@ if st.button("🚀 شغّل جميع الوكلاء وصايب الفيديو", 
             topic = team_topic.strip()
             lang_code = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language]
             with st.spinner("1/5 وكيل البحث: كيجمع الأخبار والمصادر والروابط..."):
-                research = search_anything_on_web(topic + " latest news official website trailer video", GEMINI_API_KEY)
-                clips = search_reusable_video_clips(topic + " related video", limit=8)
+                research = search_anything_on_web(topic, GEMINI_API_KEY)
+                clips = search_reusable_video_clips(topic + " relevant visual footage", limit=8)
             with st.spinner("2/5 وكيل التحرير: كيكتب سيناريو اعتماداً على البحث..."):
                 if GEMINI_API_KEY:
                     try:
