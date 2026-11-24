@@ -454,6 +454,175 @@ def build_vertical_video(title, script, language="ar"):
         with open(output_path, "rb") as video_file:
             return video_file.read()
 
+
+def agent_social_scout(topic, api_key, limit=8):
+    """Scout public web-indexed social posts and separately find reusable video footage."""
+    social_query = (
+        "ابحث عن محتوى عام منشور حول: " + topic + ". "
+        "فتش خصوصاً في YouTube وTikTok وInstagram وFacebook وX وReddit، "
+        "واختر المنشورات أو المقاطع ذات التفاعل أو الصلة القوية. "
+        "أرجع روابط الصفحات الأصلية وأسماء الحسابات وتاريخ النشر إن ظهر، "
+        "وفرّق بين المحتوى الرائج والمحتوى الموثوق. لا تدّعِ أرقام مشاهدات غير ظاهرة. "
+        "لا تعتبر أن العثور على فيديو يعني أن حقوق إعادة استعماله متاحة."
+    )
+    social_results = search_anything_on_web(social_query, api_key)
+    reusable_clips = search_reusable_video_clips(topic + " video", limit=limit)
+    return social_results, reusable_clips
+
+
+def agent_write_script(topic, research, language, target_seconds, api_key):
+    """Create a narration script tailored to the requested topic, language and runtime."""
+    if not api_key:
+        raise RuntimeError("خاص GEMINI_API_KEY باش وكيل الكتابة يتحقق من المصادر ويكتب السيناريو.")
+    lang_name = {"ar": "Arabic / Darija-friendly Arabic", "fr": "French", "en": "English"}.get(language, "Arabic")
+    words = max(45, int(target_seconds * 1.9))
+    client = genai.Client(api_key=api_key)
+    prompt = (
+        "Topic: " + topic + "\\n"
+        "Target video duration: " + str(target_seconds) + " seconds. "
+        "Output language: " + lang_name + ". "
+        "Write a natural voice-over script of about " + str(words) + " words maximum, "
+        "with a strong opening and a clear ending. Match the format to the topic; do not assume it is news. "
+        "Use the research notes below as leads, verify factual claims, and do not invent facts, quotes, dates or statistics. "
+        "Keep source URLs in a final separate section titled Sources, never in the spoken narration. "
+        "Return this structure: TITLE, NARRATION, SOURCES, then a short list of visual beat suggestions. "
+        "Research notes and discovered public social links:\\n" + research[:14000]
+    )
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config={"system_instruction": "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources." ,
+                "tools": [types.Tool(google_search=types.GoogleSearch())]}
+    )
+    if not response.text or not response.text.strip():
+        raise RuntimeError("وكيل الكتابة ما رجعش سيناريو.")
+    return response.text.strip()
+
+
+def agent_download_cc_videos(clips, temp_dir, max_clips=5):
+    """Download only Commons files with an explicitly reusable CC or public-domain license."""
+    accepted = ("cc0", "cc by", "cc-by", "cc by-sa", "cc-by-sa", "public domain", "pd-")
+    downloaded = []
+    for item in clips:
+        license_text = (item.get("license") or "").strip().lower()
+        if not any(mark in license_text for mark in accepted):
+            continue
+        url = item.get("url", "")
+        ext = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+        if ext not in (".mp4", ".webm", ".ogv", ".ogg", ".mpeg", ".mpg"):
+            continue
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MYAIAgentVideoStudio/1.0"})
+            with urllib.request.urlopen(req, timeout=35) as response:
+                raw = response.read(40 * 1024 * 1024 + 1)
+            if len(raw) > 40 * 1024 * 1024 or len(raw) < 4096:
+                continue
+            path = os.path.join(temp_dir, "source_clip_" + str(len(downloaded)) + ext)
+            with open(path, "wb") as f:
+                f.write(raw)
+            downloaded.append({"path": path, "title": item.get("title", "Clip"),
+                                "license": item.get("license", ""),
+                                "artist": item.get("artist", ""),
+                                "page": item.get("page", "")})
+            if len(downloaded) >= max_clips:
+                break
+        except Exception:
+            continue
+    return downloaded
+
+
+def agent_edit_video(topic, script, clips, target_seconds, language):
+    """Assemble reusable video clips, add narration and render a vertical MP4."""
+    narration = re.split(r"(?im)^\\s*(?:sources|المصادر|المراجع)\\s*[:：]?.*$", script)[0].strip()
+    narration = re.sub(r"(?im)^\\s*(?:narration|التعليق الصوتي|النص)\\s*[:：]\\s*", "", narration)
+    narration = re.sub(r"(?im)^\\s*(?:title|العنوان)\\s*[:：]\\s*.*$", "", narration)
+    narration = re.sub(r"(?m)^\\s*#+\\s*", "", narration)
+    narration = re.sub(r"[*_`]", "", narration).strip()
+    if len(narration) < 30:
+        raise RuntimeError("النص الصوتي قصير بزاف أو ما قدرناش نستخرجوه.")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        voice_path = os.path.join(temp_dir, "voice.mp3")
+        gTTS(text=narration, lang=language, slow=False).save(voice_path)
+        usable = agent_download_cc_videos(clips, temp_dir)
+        if not usable:
+            # Honest fallback: existing renderer uses sourced still images, not stolen social clips.
+            fallback_bytes = build_vertical_video(topic, script, language=language)
+            return fallback_bytes, [], "ما تلقاوش فيديوهات بترخيص واضح قابلة للدمج؛ استعملنا صوراً مرئية مع الصوت كحل بديل."
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        per_clip = max(3.0, float(target_seconds) / len(usable))
+        segment_paths = []
+        for idx, clip in enumerate(usable):
+            segment = os.path.join(temp_dir, "segment_" + str(idx) + ".mp4")
+            cmd = [ffmpeg, "-y", "-stream_loop", "-1", "-i", clip["path"], "-t", str(per_clip),
+                   "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p",
+                   "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-r", "30", segment]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and os.path.exists(segment):
+                segment_paths.append(segment)
+        if not segment_paths:
+            fallback_bytes = build_vertical_video(topic, script, language=language)
+            return fallback_bytes, [], "تعذر تحويل المقاطع؛ استعملنا صوراً مرئية مع الصوت كحل بديل."
+        listing = os.path.join(temp_dir, "concat.txt")
+        with open(listing, "w", encoding="utf-8") as f:
+            for path in segment_paths:
+                f.write("file '" + path.replace("'", "'\\''") + "'\\n")
+        silent_video = os.path.join(temp_dir, "silent.mp4")
+        joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
+                                 "-c", "copy", silent_video], capture_output=True, text=True, timeout=180)
+        if joined.returncode != 0:
+            raise RuntimeError("فشل تجميع مقاطع الفيديو: " + (joined.stderr or "")[-500:])
+        output = os.path.join(temp_dir, "final.mp4")
+        rendered = subprocess.run([ffmpeg, "-y", "-i", silent_video, "-i", voice_path,
+                                   "-t", str(int(target_seconds)),
+                                   "-map", "0:v:0", "-map", "1:a:0",
+                                   "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+                                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                                   "-c:a", "aac", "-b:a", "160k", "-r", "30",
+                                   "-movflags", "+faststart", output],
+                                  capture_output=True, text=True, timeout=300)
+        if rendered.returncode != 0:
+            raise RuntimeError("فشل إخراج الفيديو: " + (rendered.stderr or "")[-900:])
+        with open(output, "rb") as f:
+            video_bytes = f.read()
+        return video_bytes, usable, "تم دمج مقاطع فيديو مرخصة مع التعليق الصوتي."
+
+
+def agent_verify_output(video_bytes, script, target_seconds, api_key):
+    """Check MP4 metadata and run a factual/source review of the script."""
+    if not video_bytes or len(video_bytes) < 10000:
+        raise RuntimeError("ملف الفيديو فارغ أو صغير بشكل غير طبيعي.")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = os.path.join(temp_dir, "verify.mp4")
+        with open(path, "wb") as f:
+            f.write(video_bytes)
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        probe = subprocess.run([ffmpeg, "-i", path, "-f", "null", "-"],
+                               capture_output=True, text=True, timeout=90)
+        match = re.search(r"Duration: (\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", probe.stderr or "")
+        duration = None
+        if match:
+            hh, mm, ss = match.groups()
+            duration = int(hh) * 3600 + int(mm) * 60 + float(ss)
+        if duration is None:
+            raise RuntimeError("وكيل التحقق ما قدرش يقرأ مدة الفيديو.")
+        if duration < target_seconds - 3 or duration > target_seconds + 3:
+            duration_note = "تنبيه: المدة الفعلية " + str(round(duration, 1)) + " ثانية، والهدف " + str(target_seconds) + " ثانية."
+        else:
+            duration_note = "المدة سليمة تقريباً: " + str(round(duration, 1)) + " ثانية."
+    review = "المراجعة الآلية: تم التأكد من وجود MP4 وقراءة مدته. راجع الحقائق والمصادر بصرياً قبل النشر."
+    if api_key:
+        try:
+            client = genai.Client(api_key=api_key)
+            result = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents="راجع هذا السيناريو بحثاً عن ادعاءات غير مدعومة أو تناقضات أو أخطاء لغوية. لا تخترع تحققاً لم تقم به. أعط ملاحظات موجزة فقط.\\n\\n" + script[:10000]
+            )
+            if result.text:
+                review = result.text.strip()
+        except Exception:
+            pass
+    return {"duration": duration, "duration_note": duration_note, "review": review}
+
 APP_PASSWORD = get_secret("APP_PASSWORD")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
@@ -526,71 +695,63 @@ with st.sidebar:
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
-st.subheader("🧠 Agent Team — كتب الموضوع وخلي الوكلاء يخدمو")
-st.caption("كتب أي موضوع بغيتي: علم، تاريخ، رياضة، ألعاب، أفلام، طبخ، سفر، أخبار، تعليم أو غيرها. الفريق كيبحت حسب طبيعة الموضوع، كيختار الزاوية المناسبة، كيكتب السيناريو، كيترجم، كينشئ التعليق الصوتي وكيخرج MP4 للمراجعة.")
-team_topic = st.text_input("الموضوع", placeholder="مثلاً: أي موضوع بغيتي...")
-team_language = st.selectbox("لغة الفيديو", ["العربية", "Français", "English"], index=0, key="team_language")
-if st.button("🚀 شغّل جميع الوكلاء وصايب الفيديو", type="primary", use_container_width=True):
+st.subheader("🧠 فريق الوكلاء — من الفكرة حتى الفيديو")
+st.caption("حدد الموضوع والمدة واللغة؛ الوكلاء كيقلبو فالمحتوى العمومي، يكتبو، يركبو الفيديو، ومن بعد يتحققو من النتيجة.")
+team_topic = st.text_input("شنو الموضوع أو الفكرة؟", placeholder="مثلاً: قصة اختراع الهاتف، نهائي كرة القدم، نصائح السفر...")
+team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
+team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
+team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية")
+if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", use_container_width=True):
     if not team_topic.strip():
         st.warning("كتب الموضوع أولاً.")
+    elif not GEMINI_API_KEY:
+        st.error("خاص GEMINI_API_KEY فـ Streamlit Secrets باش البحث والكتابة والتحقق يخدمو. ما غاديش ندّعيو أن الوكلاء خدمو بلاه.")
     else:
         try:
             topic = team_topic.strip()
-            lang_code = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language]
-            with st.spinner("1/5 وكيل البحث: كيجمع الأخبار والمصادر والروابط..."):
-                research = search_anything_on_web(topic, GEMINI_API_KEY)
-                clips = search_reusable_video_clips(topic + " relevant visual footage", limit=8)
-            with st.spinner("2/5 وكيل التحرير: كيكتب سيناريو اعتماداً على البحث..."):
-                if GEMINI_API_KEY:
-                    try:
-                        draft = research_and_write_script(topic, GEMINI_API_KEY, "gemini-2.5-flash")
-                    except Exception:
-                        draft = research_with_openrouter_rss(topic, OPENROUTER_API_KEY) if OPENROUTER_API_KEY else research
-                elif OPENROUTER_API_KEY:
-                    draft = research_with_openrouter_rss(topic, OPENROUTER_API_KEY)
-                else:
-                    draft = research
-            with st.spinner("3/5 وكيل الترجمة: كيحضّر النص باللغة المختارة..."):
-                if lang_code != "ar" and GEMINI_API_KEY:
-                    try:
-                        client = genai.Client(api_key=GEMINI_API_KEY)
-                        translated = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents="Translate this video script into " + team_language + ". Preserve facts, links and the separate sources section. Do not add facts.\n\n" + draft
-                        )
-                        if translated.text:
-                            draft = translated.text
-                    except Exception:
-                        st.warning("تعذرت الترجمة الآلية؛ غادي نستعمل النص الأصلي.")
-            with st.spinner("4/5 وكيل الصوت والمونتاج: كينشئ التعليق الصوتي ويركب الفيديو..."):
-                video_bytes = build_vertical_video(topic, draft, language=lang_code)
+            progress = st.progress(0, text="Agent 1/4 — كيقلب فالمحتوى العمومي...")
+            social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY)
+            progress.progress(25, text="Agent 2/4 — كيكتب السيناريو حسب الموضوع والمدة...")
+            draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY)
+            progress.progress(50, text="Agent 3/4 — كينشئ الصوت وكيركب اللقطات...")
+            video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language)
+            progress.progress(80, text="Agent 4/4 — كيتحقق من الملف والمدة والسيناريو...")
+            verification = agent_verify_output(video_bytes, draft, team_duration, GEMINI_API_KEY)
+            progress.progress(100, text="سالاو مراحل الفريق.")
             st.session_state["team_video"] = video_bytes
             st.session_state["team_script"] = draft
-            st.session_state["team_research"] = research
-            st.session_state["team_clips"] = clips
+            st.session_state["team_research"] = social_results
+            st.session_state["team_clips"] = candidate_clips
+            st.session_state["team_used_clips"] = used_clips
+            st.session_state["team_edit_note"] = edit_note
+            st.session_state["team_verification"] = verification
             st.session_state["team_topic"] = topic
-            st.success("سالاو الوكلاء الخدمة. الفيديو واجد للمشاهدة والتحميل والمراجعة.")
+            st.success("الفريق كمل المهمة. راجع الفيديو والمصادر قبل النشر.")
         except Exception as team_error:
-            safe = str(team_error).replace(GEMINI_API_KEY, "[API KEY HIDDEN]").replace(OPENROUTER_API_KEY, "[API KEY HIDDEN]")
-            st.error("ما كملش الفريق المهمة. شوف تفاصيل الخطأ وجرب مرة أخرى.")
-            st.code(safe[:1400])
+            st.error("واحد من الوكلاء ما قدرش يكمل المهمة.")
+            st.code(str(team_error)[:1400])
 
 if st.session_state.get("team_video"):
-    st.markdown("### 🎬 الفيديو النهائي")
+    st.markdown("### 🎬 الفيديو الناتج")
     st.video(st.session_state["team_video"])
-    st.download_button("⬇️ حمّل الفيديو MP4", st.session_state["team_video"], file_name="MY_AI_AGENT_video.mp4", mime="video/mp4", use_container_width=True)
-    with st.expander("📝 السيناريو والمصادر اللي اعتمد عليها"):
+    st.download_button("⬇️ تحميل MP4", st.session_state["team_video"], file_name="MY_AI_AGENT_video.mp4", mime="video/mp4", use_container_width=True)
+    st.info(st.session_state.get("team_edit_note", ""))
+    verification = st.session_state.get("team_verification", {})
+    st.markdown("**Agent Verifier**")
+    st.write(verification.get("duration_note", ""))
+    st.write(verification.get("review", ""))
+    with st.expander("📝 السيناريو والمصادر"):
         st.text(st.session_state.get("team_script", ""))
-    with st.expander("🔎 نتائج البحث"):
+    with st.expander("📡 نتائج البحث فالمصادر العمومية والشبكات"):
         st.markdown(st.session_state.get("team_research", ""))
-    with st.expander("🎞️ لقطات فيديو ومواد مرئية مرشحة"):
-        clips = st.session_state.get("team_clips", [])
-        if not clips:
-            st.info("ما تلقاتش لقطات فيديو قابلة لإعادة الاستخدام فـ Wikimedia Commons. استعمل روابط البحث للمصادر الأخرى.")
-        for clip in clips:
+    with st.expander("🎞️ المقاطع المرخصة اللي تدمجات"):
+        used = st.session_state.get("team_used_clips", [])
+        if not used:
+            st.write("ما تدمج حتى مقطع فيديو بترخيص واضح؛ استعملنا صوراً كبديل.")
+        for clip in used:
             st.markdown(f"**{clip['title']}** — {clip['license']} — {clip['artist']}")
             if clip.get("page"):
-                st.markdown(f"[المصدر والترخيص]({clip['page']}) · [ملف الفيديو]({clip['url']})")
+                st.markdown(f"[المصدر والترخيص]({clip['page']})")
 
 st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
 st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
