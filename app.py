@@ -191,11 +191,11 @@ def research_and_write_script(topic, api_key, model):
 
 def build_vertical_video(title, script, language="ar"):
     # Keep sources in the review panel, but never read them aloud.
-    narration = re.split(r"(?im)^\\s*(?:المصادر|المراجع|sources|references)\\s*[:：]?.*$", script)[0].strip()
-    narration = re.sub(r"(?im)^\\s*(?:عنوان الفيديو|العنوان|عنوان|headline)\\s*[:：]\\s*", "", narration)
-    narration = re.sub(r"(?m)^\\s*#+\\s*", "", narration)
+    narration = re.split(r"(?im)^\s*(?:المصادر|المراجع|sources|references)\s*[:：]?.*$", script)[0].strip()
+    narration = re.sub(r"(?im)^\s*(?:عنوان الفيديو|العنوان|عنوان|headline)\s*[:：]\s*", "", narration)
+    narration = re.sub(r"(?m)^\s*#+\s*", "", narration)
     narration = re.sub(r"[*_`]", "", narration).strip()
-    paragraphs = [p.strip(" -•\\t") for p in re.split(r"(?<=[.!؟])\\s+|\\n+", narration) if p.strip(" -•\\t")]
+    paragraphs = [p.strip(" -•\t") for p in re.split(r"(?<=[.!؟])\s+|\n+", narration) if p.strip(" -•\t")]
     if not paragraphs:
         raise ValueError("ما لقيتش نص التعليق الصوتي قبل فقرة المصادر. عاود إنشاء السيناريو.")
     scenes = []
