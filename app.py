@@ -850,7 +850,7 @@ def agent_build_narration_text(topic, research, language):
 
 
 def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar"):
-    """Editor agent: assemble reusable footage into a silent MP4; no script or voiceover stage."""
+    """Editor agent: assemble topic-relevant reusable footage into a vertical MP4 with spoken narration."""
     with tempfile.TemporaryDirectory() as temp_dir:
         usable = agent_download_cc_videos(clips, temp_dir)
         for upload_index, uploaded in enumerate(uploaded_sources or []):
@@ -1047,9 +1047,9 @@ with st.sidebar:
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
-st.subheader("🧠 فريق الوكلاء — كل وكيل مستقل")
-st.caption("شغّل كل وكيل بوحدو وراجع النتيجة ديالو. كل وكيل كيستعمل مخرجات الوكلاء السابقين؛ وتقدر تعاود أي مرحلة بلا ما تعاود المشروع كامل.")
-team_topic = st.text_input("الموضوع", placeholder="مثلاً: Foot Maroc أو GTA 6 أو أي موضوع آخر", key="agent_topic")
+st.subheader("🎬 صايب فيديو ممتع على أي موضوع")
+st.caption("كتب الموضوع اللي بغيتي، والفريق غادي يبحث عليه، يلقى لقطات فيديو مرخّصة ومرتبطة به، يركّبها مع تعليق صوتي، ثم يفحص ملف MP4. الهدف فيديو قصير وممتع، ماشي عرض صور.")
+team_topic = st.text_input("الموضوع", placeholder="مثلاً: Les plus beaux buts des joueurs، السيارات الخارقة، قصص غريبة...", key="agent_topic")
 team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
 team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
 team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية", key="agent_duration")
@@ -1091,7 +1091,7 @@ with st.expander("1️⃣ وكيل البحث — كيقلب على الموضو
         st.text_area("نتيجة البحث المحفوظة", st.session_state["agent_research"], height=160, key="research_preview")
 
 with st.expander("2️⃣ وكيل العثور على الفيديوهات المرخصة"):
-    st.write("كيجمع فيديوهات CC/Public Domain المتاحة. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
+    st.write("كيبحث على لقطات حقيقية مرتبطة بنفس الموضوع من مكتبات تسمح بإعادة الاستعمال. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
     if st.button("شغّل وكيل الفيديوهات", key="run_clips"):
         if not team_topic.strip(): st.error("كتب الموضوع أولاً.")
         else:
@@ -1104,7 +1104,7 @@ with st.expander("2️⃣ وكيل العثور على الفيديوهات ال
         st.markdown(f"- **{clip.get('title','Video')}** — {clip.get('license','license unknown')} — [المصدر]({clip.get('page')})" if clip.get("page") else f"- {clip.get('title','Video')} — {clip.get('license','license unknown')}")
 
 with st.expander("3️⃣ وكيل المونتاج"):
-    st.write("كيجمع الفيديوهات المرخصة أو اللي رفعتَها، ويضيف تعليقاً صوتياً آلياً اعتماداً على نتائج البحث، بلا مرحلة سيناريو مستقلة.")
+    st.write("كيمنتج اللقطات الحقيقية اللي لقاها أو الفيديوهات اللي رفعتَها، ويضيف تعليقاً صوتياً آلياً. ما كيعوّضش الفيديو بصور ثابتة إذا ما لقا حتى لقطة مناسبة.")
     if st.button("شغّل وكيل المونتاج", key="run_editor"):
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
@@ -1130,7 +1130,7 @@ with st.expander("4️⃣ وكيل التحقق"):
                 st.write(st.session_state["agent_verify"])
             except Exception as exc: st.error("وكيل التحقق: " + str(exc)[:1500])
 
-if st.button("🚀 شغّل الفريق كامل بالترتيب", type="primary", use_container_width=True, key="run_all_agents"):
+if st.button("🎬 صايب الفيديو دابا", type="primary", use_container_width=True, key="run_all_agents"):
     if team_topic.strip():
         try:
             progress = st.progress(0, text="1/4 — البحث...")
@@ -1147,7 +1147,7 @@ if st.button("🚀 شغّل الفريق كامل بالترتيب", type="prima
             verification = agent_verify_output(video, "", team_duration, "")
             st.session_state["agent_verify"] = verification
             progress.progress(1.0, text="4/4 — اكتمل الفريق.")
-            st.success("الفريق كمل. الفيديو فيه تعليق صوتي آلي؛ راجع دقة المعلومات وحقوق الاستعمال قبل النشر.")
+            st.success("الفيديو تْصاوب وتْفحص. تفرّج فيه وراجع دقة المعلومات وحقوق استعمال كل لقطة قبل النشر.")
         except Exception as exc:
             st.error("توقف الفريق: " + str(exc)[:1800])
     else:
