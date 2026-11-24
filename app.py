@@ -1069,9 +1069,7 @@ def agent_ready():
     if not team_topic.strip():
         st.error("كتب الموضوع أولاً.")
         return False
-    if not (GEMINI_API_KEY or OPENROUTER_API_KEY):
-        st.error("خاص GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets.")
-        return False
+    # Public RSS research plus licensed-footage search and gTTS can run without paid AI API keys.
     return True
 
 st.markdown("#### الوكلاء والمهام ديالهم")
