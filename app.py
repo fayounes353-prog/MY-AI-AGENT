@@ -620,8 +620,10 @@ def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_so
             if result.returncode == 0 and os.path.exists(segment):
                 segment_paths.append(segment)
         if not segment_paths:
-            fallback_bytes = build_vertical_video(topic, script, language=language)
-            return fallback_bytes, [], "تعذر تحويل المقاطع؛ استعملنا صوراً مرئية مع الصوت كحل بديل."
+            raise RuntimeError(
+                "لقينا مصادر فيديو ولكن FFmpeg ما قدرش يحولها لمقاطع قابلة للمونتاج. "
+                "ما خرجناش عرض صور على أنه فيديو حقيقي. جرّب فيديو MP4 آخر أو ملف مصدر مختلف."
+            )
         listing = os.path.join(temp_dir, "concat.txt")
         with open(listing, "w", encoding="utf-8") as f:
             for path in segment_paths:
@@ -773,16 +775,22 @@ if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", u
     elif not (GEMINI_API_KEY or OPENROUTER_API_KEY):
         st.error("خاص GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets باش يخدم وكيل الكتابة.")
     else:
+        stage = "تهيئة المهمة"
         try:
             topic = team_topic.strip()
             progress = st.progress(0, text="Agent 1/5 — كيقلب فالمحتوى العمومي والشبكات...")
+            stage = "البحث عن المحتوى والفيديوهات"
             social_results, candidate_clips = agent_social_scout(topic, GEMINI_API_KEY)
             progress.progress(20, text="Agent 2/5 — كيكتب السيناريو...")
+            stage = "كتابة السيناريو"
             draft = agent_write_script(topic, social_results, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
             progress.progress(40, text="Agent 3/5 — كينشئ التعليق الصوتي...")
+            stage = "إنشاء التعليق الصوتي"
             progress.progress(60, text="Agent 4/5 — كيركب الفيديو وكيضبط المدة...")
+            stage = "تحميل وتحويل وتركيب مقاطع الفيديو"
             video_bytes, used_clips, edit_note = agent_edit_video(topic, draft, candidate_clips, team_duration, team_language, team_source_videos)
             progress.progress(85, text="Agent 5/5 — كيتحقق من الفيديو والسيناريو...")
+            stage = "التحقق من الفيديو النهائي"
             verification = agent_verify_output(video_bytes, draft, team_duration, GEMINI_API_KEY)
             progress.progress(100, text="سالاو الوكلاء الخمسة.")
             st.session_state["team_video"] = video_bytes
@@ -795,8 +803,8 @@ if st.button("🚀 شغّل فريق الوكلاء كامل", type="primary", u
             st.session_state["team_topic"] = topic
             st.success("تم إنشاء ملف فيديو. راجع بنفسك اللقطات والمصادر قبل النشر؛ اختيار أفضل لحظات المباراة بالتحليل البصري ما زال غير مفعّل.")
         except Exception as team_error:
-            st.error("واحد من الوكلاء ما قدرش يكمل المهمة.")
-            st.code(str(team_error)[:1400])
+            st.error("توقفت المهمة في المرحلة: " + stage)
+            st.code(str(team_error)[:1800])
 
 if st.session_state.get("team_video"):
     st.markdown("### 🎬 الفيديو الناتج")
