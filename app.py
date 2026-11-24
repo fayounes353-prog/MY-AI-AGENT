@@ -102,6 +102,48 @@ def find_visual_image(query, temp_dir, index):
     return None
 
 
+def search_reusable_video_clips(query, limit=8):
+    """Search Wikimedia Commons for video files and return source/license metadata."""
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": query + " filetype:video",
+        "gsrnamespace": 6,
+        "gsrlimit": limit,
+        "prop": "imageinfo",
+        "iiprop": "url|extmetadata",
+        "iiurlwidth": 640,
+        "format": "json"
+    })
+    request = urllib.request.Request(
+        "https://commons.wikimedia.org/w/api.php?" + params,
+        headers={"User-Agent": "MYAIAgentVideoStudio/1.0 (video research assistant)"}
+    )
+    with urllib.request.urlopen(request, timeout=25) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    results = []
+    for page in payload.get("query", {}).get("pages", {}).values():
+        info = (page.get("imageinfo") or [{}])[0]
+        file_url = info.get("url", "")
+        extension = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower()
+        if extension not in (".webm", ".ogv", ".ogg", ".mp4", ".mpeg", ".mpg"):
+            continue
+        metadata = info.get("extmetadata") or {}
+        def metadata_value(key):
+            value = metadata.get(key, {}).get("value", "")
+            return re.sub(r"<[^>]+>", "", str(value)).strip()
+        results.append({
+            "title": page.get("title", "Video"),
+            "url": file_url,
+            "page": info.get("descriptionurl", ""),
+            "license": metadata_value("LicenseShortName") or metadata_value("UsageTerms") or "راجع صفحة الملف",
+            "artist": metadata_value("Artist") or "غير محدد",
+            "credit": metadata_value("Credit")
+        })
+    return results
+
+
 def make_video_slide(title, paragraph, output_path, index, total, image_path=None):
     width, height = 1080, 1920
     if image_path:
@@ -422,6 +464,38 @@ with st.sidebar:
         st.rerun()
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
+
+st.subheader("🎞️ Video Search Agent — البحث عن مقاطع فيديو")
+st.caption("كيقلب فـ Wikimedia Commons على مقاطع فيديو قابلة لإعادة الاستخدام، وكيعرض المصدر والترخيص باش تراجع الشروط قبل النشر.")
+with st.form("video_search_form"):
+    clip_query = st.text_input("شنو نوع الفيديو اللي كتقلب عليه؟", placeholder="مثلاً: Casablanca street, ocean waves, football stadium")
+    search_submitted = st.form_submit_button("🔎 قلب على فيديوهات", use_container_width=True)
+if search_submitted:
+    if not clip_query.strip():
+        st.warning("كتب موضوع البحث أولاً.")
+    else:
+        try:
+            with st.spinner("Agent البحث كيقلب على مقاطع مناسبة..."):
+                st.session_state["video_clip_results"] = search_reusable_video_clips(clip_query.strip())
+                st.session_state["video_clip_query"] = clip_query.strip()
+        except Exception as search_error:
+            st.error("ما قدرش Agent البحث يوصل للمكتبة دابا.")
+            st.caption(str(search_error)[:500])
+
+if "video_clip_results" in st.session_state:
+    clip_results = st.session_state["video_clip_results"]
+    st.caption(f"نتائج البحث عن: {st.session_state.get('video_clip_query', '')} — {len(clip_results)} مقطع")
+    if not clip_results:
+        st.info("ما تلقاو حتى مقاطع فيديو مطابقة. جرّب كلمات بحث بالإنجليزية.")
+    for clip_index, clip in enumerate(clip_results):
+        with st.expander(f"🎬 {clip['title']}"):
+            st.write("الترخيص:", clip["license"])
+            st.write("صاحب العمل / النسبة:", clip["artist"])
+            if clip["page"]:
+                st.markdown(f"[فتح صفحة المصدر ومراجعة شروط الاستعمال]({clip['page']})")
+            st.markdown(f"[فتح ملف الفيديو الأصلي]({clip['url']})")
+            if clip_index < 3:
+                st.video(clip["url"])
 
 st.subheader("🎬 CHNO WA9E3 — Video Studio")
 st.caption("الوكيل يختار موضوعاً إخبارياً عاماً، يبحث عنه، يكتب السيناريو ويصنع الفيديو بالصوت والصور في خطوة واحدة.")
