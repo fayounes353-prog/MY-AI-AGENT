@@ -188,7 +188,7 @@ def search_anything_on_web(query, api_key="", openrouter_api_key=""):
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents=prompt,
                 config={
                     "system_instruction": "أنت وكيل بحث على الإنترنت. استعمل البحث الفعلي واستشهد بروابط حقيقية.",
@@ -532,27 +532,28 @@ def agent_social_scout(topic, api_key, openrouter_api_key="", limit=8):
 
 
 def agent_write_script(topic, research, language, target_seconds, gemini_api_key="", openrouter_api_key=""):
-    """Create a narration script; fall back between configured providers with useful diagnostics."""
+    """Create a narration script with current Gemini and robust OpenRouter retries."""
     lang_name = {"ar": "Arabic / Darija-friendly Arabic", "fr": "French", "en": "English"}.get(language, "Arabic")
     words = max(45, int(target_seconds * 1.9))
+    research_notes = (research or "No research notes were returned.")[:10000]
     prompt = (
-        "Topic: " + topic + "\\n"
-        "Target video duration: " + str(target_seconds) + " seconds. "
-        "Output language: " + lang_name + ". "
-        "Write a natural voice-over script of about " + str(words) + " words maximum, "
-        "with a strong opening and a clear ending. Match the format to the topic; do not assume it is news. "
-        "Use the research notes below as leads. Do not invent facts, quotes, dates or statistics. "
-        "Keep source URLs in a final separate section titled Sources, never in spoken narration. "
-        "Return TITLE, NARRATION, SOURCES, then short visual beat suggestions. "
-        "Research notes and discovered public links:\\n" + (research or "No research notes were returned.")[:14000]
+        "Topic: " + topic + "\n"
+        "Target duration: " + str(target_seconds) + " seconds. "
+        "Language: " + lang_name + ". "
+        "Write about " + str(words) + " spoken words, concise and natural. "
+        "Start with a hook and end cleanly. Match the subject; do not assume it is news. "
+        "Use research notes only as leads. Never invent facts, quotes, dates, statistics or sources. "
+        "Return exactly these sections: TITLE, NARRATION, SOURCES. "
+        "Keep spoken narration separate from sources. Keep the narration short enough to finish in one response.\n\n"
+        "Research notes:\n" + research_notes
     )
-    system_prompt = "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources."
+    system_prompt = "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources. Finish every section and end with a complete sentence."
     errors = []
     if gemini_api_key:
         try:
             client = genai.Client(api_key=gemini_api_key)
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents=prompt,
                 config={"system_instruction": system_prompt, "tools": [types.Tool(google_search=types.GoogleSearch())]}
             )
@@ -563,42 +564,68 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
         except Exception as exc:
             errors.append("Gemini: " + str(exc)[:500])
     if openrouter_api_key:
-        try:
-            payload = json.dumps({
-                "model": "openrouter/free",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": max(1200, min(5000, words * 5))
-            }).encode("utf-8")
-            request = urllib.request.Request(
-                "https://openrouter.ai/api/v1/chat/completions",
-                data=payload,
-                headers={"Authorization": "Bearer " + openrouter_api_key, "Content-Type": "application/json",
-                         "HTTP-Referer": "https://my-ai-agent-fdypqn9sqseempebgo82yf.streamlit.app",
-                         "X-Title": "MY AI AGENT"},
-                method="POST"
+        # A second, shorter attempt handles free providers that stop early with finish_reason=length.
+        attempts = [
+            (prompt, max(1800, min(4000, words * 18))),
+            (
+                "Write a complete, concise " + lang_name + " voice-over for: " + topic + ". "
+                "Target " + str(max(45, int(words * 0.65))) + " spoken words. "
+                "Use only these notes; do not invent facts: " + research_notes[:4500] +
+                "\nReturn TITLE, NARRATION and SOURCES. Finish with a complete sentence.",
+                4000
             )
-            with urllib.request.urlopen(request, timeout=120) as response:
-                data = json.loads(response.read().decode("utf-8"))
-            choices = data.get("choices") or []
-            result_text = choices[0].get("message", {}).get("content", "") if choices else ""
-            if isinstance(result_text, list):
-                result_text = " ".join(part.get("text", "") for part in result_text if isinstance(part, dict))
-            if isinstance(result_text, str) and result_text.strip():
-                return result_text.strip()
-            errors.append("OpenRouter رجع استجابة بلا نص: " + str(data)[:350])
-        except Exception as exc:
-            detail = str(exc)
-            if hasattr(exc, "read"):
-                try:
-                    detail += " | " + exc.read().decode("utf-8", errors="replace")[:500]
-                except Exception:
-                    pass
-            errors.append("OpenRouter: " + detail[:900])
-    raise RuntimeError("تعذر إنشاء السيناريو بجميع خدمات الكتابة المتاحة. " + " | ".join(errors or ["ما كاين حتى API key صالح فـ Streamlit Secrets."]))
+        ]
+        for attempt_no, (attempt_prompt, token_limit) in enumerate(attempts, start=1):
+            try:
+                payload = json.dumps({
+                    "model": "openrouter/free",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": attempt_prompt}
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": token_limit
+                }).encode("utf-8")
+                request = urllib.request.Request(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    data=payload,
+                    headers={"Authorization": "Bearer " + openrouter_api_key, "Content-Type": "application/json",
+                             "HTTP-Referer": "https://my-ai-agent-fdypqn9sqseempebgo82yf.streamlit.app",
+                             "X-Title": "MY AI AGENT"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                choices = data.get("choices") or []
+                choice = choices[0] if choices else {}
+                message = choice.get("message", {}) or {}
+                result_text = message.get("content", "")
+                if isinstance(result_text, list):
+                    result_text = " ".join(
+                        part.get("text", "") for part in result_text
+                        if isinstance(part, dict) and part.get("type") in ("text", "output_text")
+                    )
+                finish_reason = choice.get("finish_reason", "")
+                if isinstance(result_text, str) and len(result_text.strip()) >= 100:
+                    cleaned = result_text.strip()
+                    if finish_reason != "length":
+                        return cleaned
+                    errors.append("OpenRouter المحاولة " + str(attempt_no) + " تقطعات بسبب حد طول الإجابة")
+                    # Accept a length-limited answer only if it ends cleanly and contains a usable narration.
+                    if re.search(r"[.!؟؟][\"'»)]?\s*$", cleaned) and re.search(r"(?i)NARRATION|التعليق الصوتي|النص", cleaned):
+                        if attempt_no == len(attempts):
+                            return cleaned
+                else:
+                    errors.append("OpenRouter المحاولة " + str(attempt_no) + " رجعات بلا نص كافٍ")
+            except Exception as exc:
+                detail = str(exc)
+                if hasattr(exc, "read"):
+                    try:
+                        detail += " | " + exc.read().decode("utf-8", errors="replace")[:400]
+                    except Exception:
+                        pass
+                errors.append("OpenRouter المحاولة " + str(attempt_no) + ": " + detail[:650])
+    raise RuntimeError("تعذر إنشاء السيناريو. " + " | ".join(errors or ["ما كاين حتى API key صالح فـ Streamlit Secrets."]))
 
 
 def agent_create_voiceover_bytes(script, language):
@@ -766,7 +793,7 @@ def agent_verify_output(video_bytes, script, target_seconds, api_key):
         try:
             client = genai.Client(api_key=api_key)
             result = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents="راجع هذا السيناريو بحثاً عن ادعاءات غير مدعومة أو تناقضات أو أخطاء لغوية. لا تخترع تحققاً لم تقم به. أعط ملاحظات موجزة فقط.\n\n" + script[:10000]
             )
             if result.text:
