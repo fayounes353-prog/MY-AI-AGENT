@@ -1,4 +1,5 @@
 import os
+import hmac
 import streamlit as st
 from google import genai
 
@@ -7,6 +8,15 @@ st.set_page_config(
     page_icon="🤖",
     layout="centered",
 )
+
+def get_secret(name, default=""):
+    try:
+        return str(st.secrets.get(name, default))
+    except Exception:
+        return os.getenv(name, default)
+
+APP_PASSWORD = get_secret("APP_PASSWORD")
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
 st.markdown("""
 <style>
@@ -17,6 +27,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Private-site access gate: password is configured in the host's Secrets,
+# never stored in this source file or displayed in the interface.
+if not APP_PASSWORD:
+    st.title("🔒 MY AI AGENT — Private access")
+    st.error("الموقع مازال ما تهيّأش: خاص المسؤول يضيف APP_PASSWORD فـ Secrets ديال الاستضافة.")
+    st.info("منين نربطو الموقع بالاستضافة، غادي نضيفو كلمة السر فالإعدادات السرية ديالها. ما تحطّهاش فهاد الملف.")
+    st.stop()
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔐 MY AI AGENT")
+    st.caption("Private AI assistant")
+    with st.form("login_form"):
+        password = st.text_input("كلمة المرور / Password", type="password")
+        submitted = st.form_submit_button("دخول / Sign in", use_container_width=True)
+    if submitted:
+        if hmac.compare_digest(password, APP_PASSWORD):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("كلمة المرور غير صحيحة.")
+    st.stop()
+
 st.markdown('<div class="hero">', unsafe_allow_html=True)
 st.title("🤖 MY AI AGENT")
 st.caption("مساعدك الذكي — Your personal AI assistant")
@@ -24,11 +59,6 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    api_key = st.text_input(
-        "Gemini API key",
-        type="password",
-        help="Your key is used only for this session. Do not share it with anyone.",
-    )
     model = st.selectbox("AI model", ["gemini-2.5-flash", "gemini-2.0-flash"])
     mode = st.selectbox(
         "Assistant mode",
@@ -37,8 +67,12 @@ with st.sidebar:
     if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
+    if st.button("Log out", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.messages = []
+        st.rerun()
     st.divider()
-    st.caption("The first version can chat, write, explain and help with code. External actions and automatic web research are not connected yet.")
+    st.caption("Private login is enabled. The AI uses the server-side Gemini key configured in hosting Secrets.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -54,9 +88,8 @@ if question:
     with st.chat_message("user"):
         st.markdown(question)
 
-    key = api_key.strip() or os.getenv("GEMINI_API_KEY", "")
-    if not key:
-        warning = "باش يخدم الذكاء الاصطناعي، دخل Gemini API key من Settings فالجهة اليسرى. ما تشاركش المفتاح ديالك مع حتى واحد."
+    if not GEMINI_API_KEY:
+        warning = "خاص المسؤول يضيف GEMINI_API_KEY فـ Secrets ديال الاستضافة باش يخدم الذكاء الاصطناعي."
         with st.chat_message("assistant"):
             st.warning(warning)
         st.session_state.messages.append({"role": "assistant", "content": warning})
@@ -78,7 +111,7 @@ if question:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    client = genai.Client(api_key=key)
+                    client = genai.Client(api_key=GEMINI_API_KEY)
                     response = client.models.generate_content(
                         model=model,
                         contents=history,
@@ -87,6 +120,5 @@ if question:
                     answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
-                except Exception as error:
+                except Exception:
                     st.error("وقع مشكل فالربط مع Gemini. تأكد من API key أو جرّب من بعد.")
-                    st.caption(str(error)[:500])
