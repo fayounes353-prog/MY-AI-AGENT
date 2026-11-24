@@ -173,8 +173,9 @@ def research_and_write_script(topic, api_key, model):
         "ابحث في الويب عن آخر المعلومات الموثوقة حول الموضوع التالي: " + topic + "\n"
         "اكتب سيناريو فيديو عربي قصير لقناة CHNO WA9E3 مدته 45 إلى 60 ثانية. "
         "استعمل معلومات حديثة فقط إذا وجدت مصادر موثوقة، وميّز بين المؤكد وغير المؤكد. "
-        "لا تخترع أرقاما أو تصريحات. ابدأ بعنوان جذاب ثم 5 إلى 7 جمل قصيرة مناسبة للتعليق الصوتي. "
-        "في النهاية أضف فقرة بعنوان المصادر تتضمن روابط أو أسماء المصادر التي اعتمدت عليها. "
+        "رتّب الإجابة هكذا: سطر أول يبدأ بعنوان: ثم عنوان قصير؛ بعده نص التعليق الصوتي في 5 إلى 7 جمل قصيرة؛ "
+        "ثم فقرة مستقلة بعنوان المصادر تحتوي روابط أو أسماء المصادر. "
+        "لا تخترع أرقاما أو تصريحات، ولا تضع المصادر داخل نص التعليق الصوتي. "
         "لا تنقل نصوصا محمية ولا تعِد نشر فيديوهات الآخرين."
     )
     response = client.models.generate_content(
@@ -189,9 +190,14 @@ def research_and_write_script(topic, api_key, model):
 
 
 def build_vertical_video(title, script, language="ar"):
-    paragraphs = [p.strip() for p in re.split(r"(?<=[.!؟])\s+|\n+", script) if p.strip()]
+    # Keep sources in the review panel, but never read them aloud.
+    narration = re.split(r"(?im)^\\s*(?:المصادر|المراجع|sources|references)\\s*[:：]?.*$", script)[0].strip()
+    narration = re.sub(r"(?im)^\\s*(?:عنوان الفيديو|العنوان|عنوان|headline)\\s*[:：]\\s*", "", narration)
+    narration = re.sub(r"(?m)^\\s*#+\\s*", "", narration)
+    narration = re.sub(r"[*_`]", "", narration).strip()
+    paragraphs = [p.strip(" -•\\t") for p in re.split(r"(?<=[.!؟])\\s+|\\n+", narration) if p.strip(" -•\\t")]
     if not paragraphs:
-        paragraphs = [script.strip()]
+        raise ValueError("ما لقيتش نص التعليق الصوتي قبل فقرة المصادر. عاود إنشاء السيناريو.")
     scenes = []
     for p in paragraphs:
         while len(p) > 260:
@@ -208,7 +214,7 @@ def build_vertical_video(title, script, language="ar"):
 
     with tempfile.TemporaryDirectory() as temp_dir:
         audio_path = os.path.join(temp_dir, "voice.mp3")
-        tts = gTTS(text=script, lang=language, slow=False)
+        tts = gTTS(text=" ".join(paragraphs), lang=language, slow=False)
         tts.save(audio_path)
 
         concat_path = os.path.join(temp_dir, "slides.txt")
