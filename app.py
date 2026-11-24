@@ -213,7 +213,23 @@ def build_vertical_video(title, script, language="ar"):
 
         concat_path = os.path.join(temp_dir, "slides.txt")
         slide_paths = []
-        durations = [max(4.0, len(s) / 6.0 + 2.0) for s in scenes]
+        # Measure the generated narration so scene captions stay on screen for the full voiceover.
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        probe = subprocess.run(
+            [ffmpeg, "-i", audio_path, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=60
+        )
+        duration_match = re.search(r"Duration: (\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", probe.stderr or "")
+        if duration_match:
+            hh, mm, ss = duration_match.groups()
+            audio_duration = int(hh) * 3600 + int(mm) * 60 + float(ss)
+        else:
+            audio_duration = max(12.0, sum(len(s) for s in scenes) / 11.0)
+        weights = [max(1, len(s)) for s in scenes]
+        total_weight = sum(weights)
+        durations = [max(2.5, audio_duration * w / total_weight) for w in weights]
+        # Keep the slideshow slightly longer than the narration to avoid cutting the last words.
+        durations[-1] += 1.0
         for i, scene in enumerate(scenes):
             # Search for a related freely reusable visual on Wikimedia Commons.
             visual_query = " ".join(scene.split()[:7])
