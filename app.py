@@ -781,17 +781,10 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
     return downloaded
 
 
-def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_sources=None, voiceover_bytes=None):
-    """Editor agent: consume researched clips, uploaded footage and the voiceover artifact."""
+def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None):
+    """Editor agent: assemble reusable footage into a silent MP4; no script or voiceover stage."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        if voiceover_bytes:
-            voice_path = os.path.join(temp_dir, "voice.mp3")
-            with open(voice_path, "wb") as audio_file:
-                audio_file.write(voiceover_bytes)
-        else:
-            voice_path = agent_voiceover(script, language, temp_dir)
         usable = agent_download_cc_videos(clips, temp_dir)
-        # User-provided footage is a reliable alternative when social platforms block downloads.
         for upload_index, uploaded in enumerate(uploaded_sources or []):
             try:
                 safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded.name)
@@ -833,33 +826,23 @@ def agent_edit_video(topic, script, clips, target_seconds, language, uploaded_so
                 conversion_errors.append(str(clip.get("title", "clip")) + ": " + str(exc)[:350])
         if not segment_paths:
             details = " | ".join(conversion_errors[:3])
-            raise RuntimeError("فشل تحويل جميع مصادر الفيديو إلى MP4. تأكد أن الملفات فيديو فعلي وليست روابط/ملفات تالفة. تفاصيل FFmpeg: " + details)
+            raise RuntimeError("فشل تحويل جميع مصادر الفيديو إلى MP4. تفاصيل FFmpeg: " + details)
         listing = os.path.join(temp_dir, "concat.txt")
         with open(listing, "w", encoding="utf-8") as listing_file:
             for path in segment_paths:
                 escaped_path = path.replace("'", "'\\''")
                 listing_file.write("file '" + escaped_path + "'\\n")
-        silent_video = os.path.join(temp_dir, "silent.mp4")
-        joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
-                                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                                 "-pix_fmt", "yuv420p", "-an", silent_video],
-                                capture_output=True, text=True, timeout=240)
-        if joined.returncode != 0 or not os.path.exists(silent_video) or os.path.getsize(silent_video) < 10000:
-            raise RuntimeError("فشل تجميع مقاطع الفيديو بعد التحويل: " + (joined.stderr or "")[-1100:])
         output = os.path.join(temp_dir, "final.mp4")
-        rendered = subprocess.run([ffmpeg, "-y", "-i", silent_video, "-i", voice_path,
-                                   "-t", str(int(target_seconds)),
-                                   "-map", "0:v:0", "-map", "1:a:0",
-                                   "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-                                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                                   "-c:a", "aac", "-b:a", "160k", "-r", "30",
-                                   "-movflags", "+faststart", output],
-                                  capture_output=True, text=True, timeout=300)
-        if rendered.returncode != 0:
-            raise RuntimeError("فشل إخراج الفيديو: " + (rendered.stderr or "")[-900:])
+        joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
+                                 "-t", str(int(target_seconds)),
+                                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                                 "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", output],
+                                capture_output=True, text=True, timeout=300)
+        if joined.returncode != 0 or not os.path.exists(output) or os.path.getsize(output) < 10000:
+            raise RuntimeError("فشل تجميع مقاطع الفيديو: " + (joined.stderr or "")[-1100:])
         with open(output, "rb") as f:
             video_bytes = f.read()
-        return video_bytes, usable, "تم دمج مقاطع فيديو مرخصة مع التعليق الصوتي."
+        return video_bytes, usable, "تم تجميع مقاطع الفيديو المرخصة في MP4 بدون سيناريو أو تعليق صوتي."
 
 
 def agent_verify_output(video_bytes, script, target_seconds, api_key):
@@ -985,8 +968,6 @@ team_source_videos = st.file_uploader(
 
 if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
 if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
-if "agent_script" not in st.session_state: st.session_state["agent_script"] = ""
-if "agent_voice" not in st.session_state: st.session_state["agent_voice"] = b""
 if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
 if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
@@ -1028,88 +1009,55 @@ with st.expander("2️⃣ وكيل العثور على الفيديوهات ال
     for clip in st.session_state["agent_clips"][:12]:
         st.markdown(f"- **{clip.get('title','Video')}** — {clip.get('license','license unknown')} — [المصدر]({clip.get('page')})" if clip.get("page") else f"- {clip.get('title','Video')} — {clip.get('license','license unknown')}")
 
-with st.expander("3️⃣ وكيل كتابة السيناريو"):
-    st.write("كيكتب نصاً مناسباً للموضوع والمدة، وكيستعمل نتائج البحث المحفوظة. ما كيفترضش أن الموضوع خبر رياضي.")
-    if st.button("شغّل وكيل السيناريو", key="run_script"):
-        if agent_ready():
-            try:
-                with st.spinner("كيكتب السيناريو..."):
-                    st.session_state["agent_script"] = agent_write_script(team_topic.strip(), st.session_state["agent_research"], team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
-                st.success("السيناريو واجد.")
-            except Exception as exc: st.error("وكيل السيناريو: " + str(exc)[:1800])
-    if st.session_state["agent_script"]:
-        st.text_area("السيناريو الناتج", st.session_state["agent_script"], height=220, key="script_preview")
-
-with st.expander("4️⃣ وكيل التعليق الصوتي"):
-    st.write("كيحوّل السيناريو المحفوظ إلى ملف MP3 مستقل.")
-    if st.button("شغّل وكيل الصوت", key="run_voice"):
-        if not st.session_state["agent_script"]: st.error("شغّل وكيل السيناريو أولاً.")
-        else:
-            try:
-                with st.spinner("كيصاوب الصوت..."):
-                    st.session_state["agent_voice"] = agent_create_voiceover_bytes(st.session_state["agent_script"], team_language)
-                st.success("الصوت واجد.")
-            except Exception as exc: st.error("وكيل الصوت: " + str(exc)[:1400])
-    if st.session_state["agent_voice"]:
-        st.audio(st.session_state["agent_voice"], format="audio/mp3")
-        st.download_button("تحميل التعليق الصوتي MP3", st.session_state["agent_voice"], "voiceover.mp3", "audio/mpeg")
-
-with st.expander("5️⃣ وكيل المونتاج"):
-    st.write("كيجمع الفيديوهات المرخصة أو الفيديوهات اللي رفعتَها مع التعليق الصوتي، وكيخرج MP4.")
+with st.expander("3️⃣ وكيل المونتاج"):
+    st.write("كيجمع الفيديوهات المرخصة أو الفيديوهات اللي رفعتَها ويخرج MP4 صامتاً، بلا سيناريو وبلا تعليق صوتي.")
     if st.button("شغّل وكيل المونتاج", key="run_editor"):
-        if not st.session_state["agent_script"]: st.error("خاص السيناريو أولاً.")
-        elif not st.session_state["agent_voice"]: st.error("خاص التعليق الصوتي أولاً.")
-        else:
-            try:
-                with st.spinner("كيحوّل ويركب المقاطع..."):
-                    video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_script"], st.session_state["agent_clips"], team_duration, team_language, team_source_videos, st.session_state["agent_voice"])
-                st.session_state["agent_video"] = video
-                st.session_state["team_used_clips"] = used
-                st.session_state["team_edit_note"] = note
-                st.success("المونتاج واجد.")
-            except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
+        try:
+            with st.spinner("كيحوّل ويركب المقاطع..."):
+                video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos)
+            st.session_state["agent_video"] = video
+            st.session_state["team_used_clips"] = used
+            st.session_state["team_edit_note"] = note
+            st.success("المونتاج واجد.")
+        except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
     if st.session_state["agent_video"]:
         st.video(st.session_state["agent_video"])
         st.download_button("تحميل الفيديو MP4", st.session_state["agent_video"], "MY_AI_AGENT_video.mp4", "video/mp4")
 
-with st.expander("6️⃣ وكيل التحقق"):
-    st.write("كيختبر ملف MP4 ومدته، ويراجع السيناريو إذا كانت خدمة Gemini متاحة.")
+with st.expander("4️⃣ وكيل التحقق"):
+    st.write("كيختبر ملف MP4 ومدته؛ بلا مراجعة سيناريو لأن مرحلة السيناريو محذوفة.")
     if st.button("شغّل وكيل التحقق", key="run_verify"):
         if not st.session_state["agent_video"]: st.error("خاص الفيديو النهائي أولاً.")
         else:
             try:
                 with st.spinner("كيتحقق من الفيديو..."):
-                    st.session_state["agent_verify"] = agent_verify_output(st.session_state["agent_video"], st.session_state["agent_script"], team_duration, GEMINI_API_KEY)
+                    st.session_state["agent_verify"] = agent_verify_output(st.session_state["agent_video"], "", team_duration, "")
                 st.success("التحقق سالا.")
                 st.write(st.session_state["agent_verify"])
             except Exception as exc: st.error("وكيل التحقق: " + str(exc)[:1500])
 
 if st.button("🚀 شغّل الفريق كامل بالترتيب", type="primary", use_container_width=True, key="run_all_agents"):
-    if agent_ready():
+    if team_topic.strip():
         try:
-            progress = st.progress(0, text="1/6 — البحث...")
+            progress = st.progress(0, text="1/4 — البحث...")
             research = search_anything_on_web(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
             st.session_state["agent_research"] = research
-            progress.progress(1/6, text="2/6 — البحث عن الفيديوهات...")
-            clips = search_reusable_video_clips(team_topic.strip() + " video", limit=12)
+            progress.progress(1/4, text="2/4 — البحث عن الفيديوهات...")
+            clips = agent_find_video_sources(team_topic.strip(), limit=12)
             st.session_state["agent_clips"] = clips
-            progress.progress(2/6, text="3/6 — السيناريو...")
-            script = agent_write_script(team_topic.strip(), research, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
-            st.session_state["agent_script"] = script
-            progress.progress(3/6, text="4/6 — التعليق الصوتي...")
-            voice = agent_create_voiceover_bytes(script, team_language)
-            st.session_state["agent_voice"] = voice
-            progress.progress(4/6, text="5/6 — المونتاج...")
-            video, used, note = agent_edit_video(team_topic.strip(), script, clips, team_duration, team_language, team_source_videos, voice)
+            progress.progress(2/4, text="3/4 — المونتاج...")
+            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos)
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
-            progress.progress(5/6, text="6/6 — التحقق...")
-            verification = agent_verify_output(video, script, team_duration, GEMINI_API_KEY)
+            progress.progress(3/4, text="4/4 — التحقق...")
+            verification = agent_verify_output(video, "", team_duration, "")
             st.session_state["agent_verify"] = verification
-            progress.progress(1.0, text="6/6 — اكتمل الفريق.")
-            st.success("الفريق كمل. راجع المحتوى وحقوق الاستعمال قبل النشر.")
+            progress.progress(1.0, text="4/4 — اكتمل الفريق.")
+            st.success("الفريق كمل. الفيديو بدون سيناريو أو تعليق صوتي؛ راجع حقوق الاستعمال قبل النشر.")
         except Exception as exc:
             st.error("توقف الفريق: " + str(exc)[:1800])
+    else:
+        st.error("كتب الموضوع أولاً.")
 
 if st.session_state["agent_verify"]:
     st.markdown("**نتيجة التحقق:**")
