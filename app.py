@@ -149,7 +149,7 @@ def search_anything_on_web(query, api_key):
     """Use Gemini grounded Google Search for broad web research on any user query."""
     client = genai.Client(api_key=api_key)
     prompt = (
-        "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\\n"
+        "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\n"
         "استعمل Google Search للعثور على صفحات ومصادر حقيقية وحديثة. "
         "إذا كان الموضوع لعبة أو فيلم أو فيديو، ابحث كذلك عن المقطع الرسمي، "
         "الموقع الرسمي، الأخبار، والمصادر المفيدة. "
