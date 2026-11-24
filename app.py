@@ -145,6 +145,89 @@ def search_reusable_video_clips(query, limit=8):
 
 
 
+def search_internet_archive_videos(query, limit=8):
+    """Find downloadable Internet Archive movie files with an explicit permissive license."""
+    terms = [x for x in re.findall(r"[A-Za-z0-9À-ÿ]+", query) if len(x) > 2][:6]
+    if not terms:
+        return []
+    license_query = '(licenseurl:"https://creativecommons.org/publicdomain/zero/1.0/" OR licenseurl:"http://creativecommons.org/publicdomain/zero/1.0/" OR licenseurl:"https://creativecommons.org/licenses/by/4.0/" OR licenseurl:"http://creativecommons.org/licenses/by/4.0/" OR licenseurl:"https://creativecommons.org/licenses/by-sa/4.0/" OR licenseurl:"http://creativecommons.org/licenses/by-sa/4.0/")'
+    text_query = " OR ".join("title:" + urllib.parse.quote(t, safe="") + " OR description:" + urllib.parse.quote(t, safe="") for t in terms)
+    # Search broad topic terms, then verify the license and actual downloadable video file from item metadata.
+    search_q = "mediatype:movies AND " + license_query + " AND (" + text_query + ")"
+    params = urllib.parse.urlencode({
+        "q": search_q,
+        "fl[]": ["identifier", "title", "licenseurl"],
+        "rows": min(max(limit * 3, 12), 36),
+        "output": "json"
+    }, doseq=True)
+    req = urllib.request.Request(
+        "https://archive.org/advancedsearch.php?" + params,
+        headers={"User-Agent": "MYAIAgentVideoStudio/1.0 (open-license video search)"}
+    )
+    with urllib.request.urlopen(req, timeout=25) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    docs = payload.get("response", {}).get("docs", [])
+    results = []
+    seen = set()
+    for doc in docs:
+        identifier = doc.get("identifier")
+        if not identifier or identifier in seen:
+            continue
+        seen.add(identifier)
+        metadata_req = urllib.request.Request(
+            "https://archive.org/metadata/" + urllib.parse.quote(identifier, safe=""),
+            headers={"User-Agent": "MYAIAgentVideoStudio/1.0"}
+        )
+        try:
+            with urllib.request.urlopen(metadata_req, timeout=20) as response:
+                metadata = json.loads(response.read().decode("utf-8"))
+            meta = metadata.get("metadata", {})
+            license_url = str(meta.get("licenseurl") or doc.get("licenseurl") or "").lower()
+            if "publicdomain/zero/1.0" in license_url:
+                license_name = "CC0 1.0 / Public Domain dedication"
+            elif "/licenses/by-sa/4.0" in license_url:
+                license_name = "CC BY-SA 4.0"
+            elif "/licenses/by/4.0" in license_url:
+                license_name = "CC BY 4.0"
+            else:
+                continue
+            files = metadata.get("files", [])
+            video_files = []
+            for file_info in files:
+                name = file_info.get("name", "")
+                fmt = str(file_info.get("format", "")).lower()
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in (".mp4", ".m4v", ".webm", ".ogv", ".mpeg", ".mpg") and "mpeg4" not in fmt and "mp4" not in fmt:
+                    continue
+                try:
+                    size = int(file_info.get("size", 0))
+                except Exception:
+                    size = 0
+                if size and size > 40 * 1024 * 1024:
+                    continue
+                if file_info.get("private") == "true":
+                    continue
+                video_files.append((0 if ext == ".mp4" else 1, name, size))
+            if not video_files:
+                continue
+            video_files.sort()
+            filename = video_files[0][1]
+            download_url = "https://archive.org/download/" + urllib.parse.quote(identifier, safe="") + "/" + urllib.parse.quote(filename, safe="/")
+            results.append({
+                "title": str(meta.get("title") or doc.get("title") or identifier),
+                "url": download_url,
+                "page": "https://archive.org/details/" + urllib.parse.quote(identifier, safe=""),
+                "license": license_name,
+                "artist": str(meta.get("creator") or "Internet Archive contributor"),
+                "credit": str(meta.get("creator") or "")
+            })
+            if len(results) >= limit:
+                break
+        except Exception:
+            continue
+    return results
+
+
 def search_anything_rss(query):
     """Fallback web search using public Google News RSS, without requiring an AI API key."""
     results = []
@@ -491,10 +574,11 @@ def build_vertical_video(title, script, language="ar"):
 
 
 def agent_find_video_sources(topic, limit=12):
-    """Search multiple generic footage queries so the agent is not tied to one topic category."""
-    queries = [topic + " video", topic + " footage", topic + " trailer"]
+    """Search Commons and Internet Archive for actual, explicitly reusable video files."""
+    queries = [topic + " video", topic + " footage", topic]
     collected, seen = [], set()
     errors = []
+    # Wikimedia Commons remains the first source.
     for query in queries:
         try:
             for item in search_reusable_video_clips(query, limit=limit):
@@ -505,11 +589,23 @@ def agent_find_video_sources(topic, limit=12):
                 if len(collected) >= limit:
                     return collected
         except Exception as exc:
-            errors.append(str(exc)[:180])
+            errors.append("Wikimedia: " + str(exc)[:160])
+    # Internet Archive adds a second source with direct MP4/WebM downloads and explicit CC0/CC BY licenses.
+    for query in [topic, topic + " cooking", topic + " food preparation"]:
+        try:
+            for item in search_internet_archive_videos(query, limit=max(3, limit - len(collected))):
+                key = item.get("url") or item.get("page") or item.get("title")
+                if key and key not in seen:
+                    seen.add(key)
+                    collected.append(item)
+                if len(collected) >= limit:
+                    return collected
+        except Exception as exc:
+            errors.append("Internet Archive: " + str(exc)[:160])
     if collected:
         return collected
     if errors:
-        raise RuntimeError("تعذر البحث عن ملفات فيديو في Wikimedia بعد تجربة عدة صيغ: " + " | ".join(errors))
+        raise RuntimeError("ما تلقينا حتى فيديو مرخص قابل للتنزيل. " + " | ".join(errors[:4]))
     return []
 
 
