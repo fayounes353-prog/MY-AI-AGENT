@@ -249,9 +249,11 @@ def build_vertical_video(title, script, language="ar"):
         cmd = [
             ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
             "-i", audio_path,
-            "-vf", "zoompan=z='min(zoom+0.00035,1.07)':d=1:s=1080x1920:fps=24,format=yuv420p",
-            "-c:v", "libx264", "-preset", "ultrafast", "-r", "24",
-            "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart",
+            "-vf", "zoompan=z='min(zoom+0.00035,1.07)':d=1:s=1080x1920:fps=30,scale=1080:1920:flags=lanczos,format=yuv420p",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+            "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
+            "-r", "30", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-movflags", "+faststart",
             output_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
