@@ -534,8 +534,6 @@ with st.form("universal_search_form"):
 if universal_submit:
     if not universal_query.strip():
         st.warning("كتب شنو كتقلب عليه.")
-    elif not GEMINI_API_KEY:
-        st.error("خاص GEMINI_API_KEY يكون محفوظ فـ Streamlit Secrets باش نخدم البحث الذكي.")
     else:
         try:
             with st.spinner("الوكيل كيقلب فالويب وكيجمع المعلومات والروابط..."):
