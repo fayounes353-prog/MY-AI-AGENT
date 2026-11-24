@@ -478,7 +478,7 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
     lang_name = {"ar": "Arabic / Darija-friendly Arabic", "fr": "French", "en": "English"}.get(language, "Arabic")
     words = max(45, int(target_seconds * 1.9))
     prompt = (
-        "Topic: " + topic + "\\n"
+        "Topic: " + topic + "\n"
         "Target video duration: " + str(target_seconds) + " seconds. "
         "Output language: " + lang_name + ". "
         "Write a natural voice-over script of about " + str(words) + " words maximum, "
@@ -486,7 +486,7 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
         "Use the research notes below as leads, verify factual claims, and do not invent facts, quotes, dates or statistics. "
         "Keep source URLs in a final separate section titled Sources, never in the spoken narration. "
         "Return this structure: TITLE, NARRATION, SOURCES, then a short list of visual beat suggestions. "
-        "Research notes and discovered public social links:\\n" + research[:14000]
+        "Research notes and discovered public social links:\n" + research[:14000]
     )
     system_prompt = "You are a careful multidisciplinary video writer and fact checker. Never fabricate sources."
     if gemini_api_key:
