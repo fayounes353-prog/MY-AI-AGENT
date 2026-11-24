@@ -478,7 +478,7 @@ def agent_write_script(topic, research, language, target_seconds, api_key):
     words = max(45, int(target_seconds * 1.9))
     client = genai.Client(api_key=api_key)
     prompt = (
-        "Topic: " + topic + "\\n"
+        "Topic: " + topic + "\n"
         "Target video duration: " + str(target_seconds) + " seconds. "
         "Output language: " + lang_name + ". "
         "Write a natural voice-over script of about " + str(words) + " words maximum, "
@@ -486,7 +486,7 @@ def agent_write_script(topic, research, language, target_seconds, api_key):
         "Use the research notes below as leads, verify factual claims, and do not invent facts, quotes, dates or statistics. "
         "Keep source URLs in a final separate section titled Sources, never in the spoken narration. "
         "Return this structure: TITLE, NARRATION, SOURCES, then a short list of visual beat suggestions. "
-        "Research notes and discovered public social links:\\n" + research[:14000]
+        "Research notes and discovered public social links:\n" + research[:14000]
     )
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -533,10 +533,10 @@ def agent_download_cc_videos(clips, temp_dir, max_clips=5):
 
 def agent_edit_video(topic, script, clips, target_seconds, language):
     """Assemble reusable video clips, add narration and render a vertical MP4."""
-    narration = re.split(r"(?im)^\\s*(?:sources|المصادر|المراجع)\\s*[:：]?.*$", script)[0].strip()
-    narration = re.sub(r"(?im)^\\s*(?:narration|التعليق الصوتي|النص)\\s*[:：]\\s*", "", narration)
-    narration = re.sub(r"(?im)^\\s*(?:title|العنوان)\\s*[:：]\\s*.*$", "", narration)
-    narration = re.sub(r"(?m)^\\s*#+\\s*", "", narration)
+    narration = re.split(r"(?im)^\s*(?:sources|المصادر|المراجع)\s*[:：]?.*$", script)[0].strip()
+    narration = re.sub(r"(?im)^\s*(?:narration|التعليق الصوتي|النص)\s*[:：]\s*", "", narration)
+    narration = re.sub(r"(?im)^\s*(?:title|العنوان)\s*[:：]\s*.*$", "", narration)
+    narration = re.sub(r"(?m)^\s*#+\s*", "", narration)
     narration = re.sub(r"[*_`]", "", narration).strip()
     if len(narration) < 30:
         raise RuntimeError("النص الصوتي قصير بزاف أو ما قدرناش نستخرجوه.")
@@ -565,7 +565,7 @@ def agent_edit_video(topic, script, clips, target_seconds, language):
         listing = os.path.join(temp_dir, "concat.txt")
         with open(listing, "w", encoding="utf-8") as f:
             for path in segment_paths:
-                f.write("file '" + path.replace("'", "'\\''") + "'\\n")
+                f.write("file '" + path.replace("'", "'\''") + "'\n")
         silent_video = os.path.join(temp_dir, "silent.mp4")
         joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
                                  "-c", "copy", silent_video], capture_output=True, text=True, timeout=180)
@@ -598,7 +598,7 @@ def agent_verify_output(video_bytes, script, target_seconds, api_key):
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         probe = subprocess.run([ffmpeg, "-i", path, "-f", "null", "-"],
                                capture_output=True, text=True, timeout=90)
-        match = re.search(r"Duration: (\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", probe.stderr or "")
+        match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr or "")
         duration = None
         if match:
             hh, mm, ss = match.groups()
@@ -615,7 +615,7 @@ def agent_verify_output(video_bytes, script, target_seconds, api_key):
             client = genai.Client(api_key=api_key)
             result = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents="راجع هذا السيناريو بحثاً عن ادعاءات غير مدعومة أو تناقضات أو أخطاء لغوية. لا تخترع تحققاً لم تقم به. أعط ملاحظات موجزة فقط.\\n\\n" + script[:10000]
+                contents="راجع هذا السيناريو بحثاً عن ادعاءات غير مدعومة أو تناقضات أو أخطاء لغوية. لا تخترع تحققاً لم تقم به. أعط ملاحظات موجزة فقط.\n\n" + script[:10000]
             )
             if result.text:
                 review = result.text.strip()
