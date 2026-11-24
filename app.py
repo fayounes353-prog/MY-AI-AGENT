@@ -120,5 +120,8 @@ if question:
                     answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
-                except Exception:
-                    st.error("وقع مشكل فالربط مع Gemini. تأكد من API key أو جرّب من بعد.")
+                except Exception as e:
+                    # Show the provider error for troubleshooting, while masking the secret key.
+                    safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
+                    st.error("وقع مشكل فالربط مع Gemini. تفاصيل الخطأ:")
+                    st.code(safe_error[:1500])
