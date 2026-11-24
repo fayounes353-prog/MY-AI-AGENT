@@ -21,7 +21,7 @@ def get_secret(name, default=""):
 
 APP_PASSWORD = get_secret("APP_PASSWORD")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
-GROQ_API_KEY = get_secret("GROQ_API_KEY")
+OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 
 st.markdown("""
 <style>
@@ -64,11 +64,11 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    provider = st.selectbox("AI provider", ["Gemini", "Groq (free alternative)"])
+    provider = st.selectbox("AI provider", ["Gemini", "OpenRouter (free models)"])
     if provider == "Gemini":
         model = st.selectbox("AI model", ["gemini-3.5-flash-lite", "gemini-3.8-flash"])
     else:
-        model = st.selectbox("AI model", ["openai/gpt-oss-120b", "openai/gpt-oss-20b"])
+        model = "openrouter/free"
     mode = st.selectbox(
         "Assistant mode",
         ["General assistant", "Writing", "Programming", "Study & explanation", "Ideas & content"],
@@ -77,7 +77,7 @@ with st.sidebar:
         web_search = st.checkbox("البحث في الإنترنت (Google)", value=False)
     else:
         web_search = False
-        st.caption("البحث المباشر غير متاح حالياً مع Groq.")
+        st.caption("البحث المباشر غير متاح حالياً مع OpenRouter.")
     if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -102,9 +102,9 @@ if question:
     with st.chat_message("user"):
         st.markdown(question)
 
-    active_key = GEMINI_API_KEY if provider == "Gemini" else GROQ_API_KEY
+    active_key = GEMINI_API_KEY if provider == "Gemini" else OPENROUTER_API_KEY
     if not active_key:
-        secret_name = "GEMINI_API_KEY" if provider == "Gemini" else "GROQ_API_KEY"
+        secret_name = "GEMINI_API_KEY" if provider == "Gemini" else "OPENROUTER_API_KEY"
         warning = f"خاص تزيد {secret_name} فـ Secrets ديال الاستضافة باش يخدم هاد المزوّد."
         with st.chat_message("assistant"):
             st.warning(warning)
@@ -167,11 +167,13 @@ if question:
                             "max_tokens": 2048,
                         }).encode("utf-8")
                         req = urllib.request.Request(
-                            "https://api.groq.com/openai/v1/chat/completions",
+                            "https://openrouter.ai/api/v1/chat/completions",
                             data=payload,
                             headers={
-                                "Authorization": f"Bearer {GROQ_API_KEY}",
+                                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                                 "Content-Type": "application/json",
+                                "HTTP-Referer": "https://my-ai-agent.streamlit.app",
+                                "X-Title": "MY AI AGENT",
                             },
                             method="POST",
                         )
@@ -182,6 +184,6 @@ if question:
                     st.session_state.messages.append({"role": "assistant", "content": answer})
                 except Exception as e:
                     safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
-                    safe_error = safe_error.replace(GROQ_API_KEY, "[API KEY HIDDEN]")
+                    safe_error = safe_error.replace(OPENROUTER_API_KEY, "[API KEY HIDDEN]")
                     st.error(f"وقع مشكل فالربط مع {provider}. تفاصيل الخطأ:")
                     st.code(safe_error[:1500])
