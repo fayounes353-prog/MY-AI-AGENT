@@ -872,20 +872,32 @@ def agent_verify_output(video_bytes, script, target_seconds, api_key):
         with open(path, "wb") as f:
             f.write(video_bytes)
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        probe = subprocess.run([ffmpeg, "-i", path, "-f", "null", "-"],
+        # First inspect the container metadata, then fully decode every video frame.
+        probe = subprocess.run([ffmpeg, "-hide_banner", "-i", path],
                                capture_output=True, text=True, timeout=90)
-        match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr or "")
+        probe_text = (probe.stderr or "") + "\n" + (probe.stdout or "")
+        match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", probe_text)
+        if not re.search(r"Stream #\d+:\d+.*Video:", probe_text):
+            raise RuntimeError("ملف MP4 ما فيهش مسار فيديو قابل للقراءة.")
         duration = None
         if match:
             hh, mm, ss = match.groups()
             duration = int(hh) * 3600 + int(mm) * 60 + float(ss)
         if duration is None:
             raise RuntimeError("وكيل التحقق ما قدرش يقرأ مدة الفيديو.")
+        decoded = subprocess.run(
+            [ffmpeg, "-v", "error", "-i", path, "-map", "0:v:0", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=180
+        )
+        decode_errors = (decoded.stderr or "").strip()
+        if decoded.returncode != 0 or decode_errors:
+            raise RuntimeError("ملف MP4 موجود ولكن فشل فك ترميز الصور داخله؛ الفيديو غير صالح للتشغيل. "
+                               + decode_errors[-900:])
         if duration < target_seconds - 3 or duration > target_seconds + 3:
             duration_note = "تنبيه: المدة الفعلية " + str(round(duration, 1)) + " ثانية، والهدف " + str(target_seconds) + " ثانية."
         else:
             duration_note = "المدة سليمة تقريباً: " + str(round(duration, 1)) + " ثانية."
-    review = "المراجعة الآلية: تم التأكد من وجود MP4 وقراءة مدته. راجع الحقائق والمصادر بصرياً قبل النشر."
+    review = "نجح اختبار MP4 وفك ترميز جميع إطارات الفيديو دون أخطاء. راجع المحتوى وحقوق الاستعمال بصرياً قبل النشر."
     if api_key:
         try:
             client = genai.Client(api_key=api_key)
