@@ -1063,28 +1063,6 @@ if st.session_state["agent_verify"]:
     st.markdown("**نتيجة التحقق:**")
     st.write(st.session_state["agent_verify"])
 
-if st.session_state.get("team_video"):
-    st.markdown("### 🎬 الفيديو الناتج")
-    st.video(st.session_state["team_video"])
-    st.download_button("⬇️ تحميل MP4", st.session_state["team_video"], file_name="MY_AI_AGENT_video.mp4", mime="video/mp4", use_container_width=True)
-    st.info(st.session_state.get("team_edit_note", ""))
-    verification = st.session_state.get("team_verification", {})
-    st.markdown("**Agent Verifier**")
-    st.write(verification.get("duration_note", ""))
-    st.write(verification.get("review", ""))
-    with st.expander("📝 السيناريو والمصادر"):
-        st.text(st.session_state.get("team_script", ""))
-    with st.expander("📡 نتائج البحث فالمصادر العمومية والشبكات"):
-        st.markdown(st.session_state.get("team_research", ""))
-    with st.expander("🎞️ المقاطع المرخصة اللي تدمجات"):
-        used = st.session_state.get("team_used_clips", [])
-        if not used:
-            st.write("ما تدمج حتى مقطع فيديو بترخيص واضح؛ استعملنا صوراً كبديل.")
-        for clip in used:
-            st.markdown(f"**{clip['title']}** — {clip['license']} — {clip['artist']}")
-            if clip.get("page"):
-                st.markdown(f"[المصدر والترخيص]({clip['page']})")
-            st.caption("احتافظ باسم صاحب العمل والترخيص عند النشر، وراجع شروط صفحة الملف.")
 
 st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
 st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
