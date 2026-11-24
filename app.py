@@ -145,27 +145,64 @@ def search_reusable_video_clips(query, limit=8):
 
 
 
-def search_anything_on_web(query, api_key):
-    """Use Gemini grounded Google Search for broad web research on any user query."""
-    client = genai.Client(api_key=api_key)
-    prompt = (
-        "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\n"
-        "استعمل Google Search للعثور على صفحات ومصادر حقيقية وحديثة. "
-        "إذا كان الموضوع لعبة أو فيلم أو فيديو، ابحث كذلك عن المقطع الرسمي، "
-        "الموقع الرسمي، الأخبار، والمصادر المفيدة. "
-        "أجب بلغة المستخدم، وقدم خلاصة واضحة ثم روابط المصادر التي عثرت عليها. "
-        "فرّق بين المعلومة المؤكدة والإشاعة، ولا تخترع روابط أو نتائج. "
-        "إذا لم تجد نتيجة مطابقة، قل ذلك واقترح كلمات بحث بديلة."
-    )
-    response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
-        contents=prompt,
-        config={
-            "system_instruction": "أنت وكيل بحث على الإنترنت. ابحث قبل الإجابة، واستشهد بمصادر وروابط حقيقية.",
-            "tools": [types.Tool(google_search=types.GoogleSearch())],
-        },
-    )
-    return response.text or "ما رجع البحث بنتائج. جرّب صياغة أخرى."
+def search_anything_rss(query):
+    """Fallback web search using public Google News RSS, without requiring an AI API key."""
+    results = []
+    for lang, gl, ceid in [("en", "US", "US:en"), ("ar", "MA", "MA:ar")]:
+        params = urllib.parse.urlencode({
+            "q": query, "hl": lang, "gl": gl, "ceid": ceid
+        })
+        url = "https://news.google.com/rss/search?" + params
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0 MYAIAgent/1.0"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=18) as response:
+                root = ET.fromstring(response.read())
+            for item in root.findall(".//item")[:10]:
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pubdate = (item.findtext("pubDate") or "").strip()
+                if title and link and all(x["link"] != link for x in results):
+                    results.append({"title": title, "link": link, "date": pubdate})
+        except Exception:
+            continue
+    if not results:
+        raise RuntimeError("ما قدرناش نوصلو حتى لمصدر بحث. تحقق من اتصال التطبيق بالإنترنت.")
+    lines = ["### نتائج البحث المباشر", "لقيت هاد النتائج المنشورة، راجع الروابط للتفاصيل:"]
+    for item in results[:15]:
+        lines.append(f"- [{item['title']}]({item['link']}) — {item['date']}")
+    lines.append("\nملاحظة: هادي نتائج RSS إخبارية؛ البحث العام الشامل كيتطلب Gemini Search.")
+    return "\n".join(lines)
+
+
+def search_anything_on_web(query, api_key=""):
+    """Try grounded Gemini search; fall back to RSS when Gemini is unavailable or quota-limited."""
+    if api_key:
+        try:
+            client = genai.Client(api_key=api_key)
+            prompt = (
+                "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\n"
+                "استعمل Google Search للعثور على صفحات ومصادر حقيقية وحديثة. "
+                "إذا كان الموضوع لعبة أو فيلم أو فيديو، ابحث كذلك عن المقطع الرسمي، "
+                "الموقع الرسمي، الأخبار، والمصادر المفيدة. "
+                "أجب بلغة المستخدم، وقدم خلاصة واضحة ثم روابط المصادر التي عثرت عليها. "
+                "فرّق بين المعلومة المؤكدة والإشاعة، ولا تخترع روابط أو نتائج."
+            )
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
+                    "system_instruction": "أنت وكيل بحث على الإنترنت. ابحث قبل الإجابة، واستشهد بمصادر وروابط حقيقية.",
+                    "tools": [types.Tool(google_search=types.GoogleSearch())],
+                },
+            )
+            if response.text and response.text.strip():
+                return response.text.strip()
+        except Exception as gemini_error:
+            fallback = search_anything_rss(query)
+            return fallback + "\n\nملاحظة تقنية: تعذر البحث الذكي مؤقتاً، لذلك استعملت البحث الإخباري المباشر."
+    return search_anything_rss(query)
 
 
 def make_video_slide(title, paragraph, output_path, index, total, image_path=None):
@@ -507,7 +544,7 @@ if universal_submit:
                 st.session_state["universal_search_query"] = universal_query.strip()
         except Exception as search_error:
             st.error("البحث ما كملش. جرّب مرة أخرى.")
-            st.caption(str(search_error)[:500])
+            st.caption("تفاصيل الخطأ: " + str(search_error)[:700])
 
 if st.session_state.get("universal_search_result"):
     st.markdown("### نتائج البحث: " + st.session_state.get("universal_search_query", ""))
