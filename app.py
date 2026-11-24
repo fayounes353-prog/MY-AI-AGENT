@@ -1,5 +1,6 @@
 import os
 import hmac
+import time
 import streamlit as st
 from google import genai
 
@@ -112,11 +113,25 @@ if question:
             with st.spinner("Thinking..."):
                 try:
                     client = genai.Client(api_key=GEMINI_API_KEY)
-                    response = client.models.generate_content(
-                        model=model,
-                        contents=history,
-                        config={"system_instruction": system_instruction},
-                    )
+                    response = None
+                    last_error = None
+                    # Retry temporary provider overload (HTTP 503) up to three times.
+                    for attempt in range(3):
+                        try:
+                            response = client.models.generate_content(
+                                model=model,
+                                contents=history,
+                                config={"system_instruction": system_instruction},
+                            )
+                            break
+                        except Exception as e:
+                            last_error = e
+                            if "503" in str(e) and attempt < 2:
+                                time.sleep(2 ** (attempt + 1))
+                                continue
+                            raise
+                    if response is None and last_error is not None:
+                        raise last_error
                     answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
