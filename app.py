@@ -1,6 +1,8 @@
 import os
 import hmac
 import time
+import json
+import urllib.request
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -19,6 +21,7 @@ def get_secret(name, default=""):
 
 APP_PASSWORD = get_secret("APP_PASSWORD")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
+GROQ_API_KEY = get_secret("GROQ_API_KEY")
 
 st.markdown("""
 <style>
@@ -61,12 +64,20 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    model = st.selectbox("AI model", ["gemini-3.5-flash-lite", "gemini-3.8-flash"])
+    provider = st.selectbox("AI provider", ["Gemini", "Groq (free alternative)"])
+    if provider == "Gemini":
+        model = st.selectbox("AI model", ["gemini-3.5-flash-lite", "gemini-3.8-flash"])
+    else:
+        model = st.selectbox("AI model", ["openai/gpt-oss-120b", "openai/gpt-oss-20b"])
     mode = st.selectbox(
         "Assistant mode",
         ["General assistant", "Writing", "Programming", "Study & explanation", "Ideas & content"],
     )
-    web_search = st.checkbox("البحث في الإنترنت (Google)", value=False)
+    if provider == "Gemini":
+        web_search = st.checkbox("البحث في الإنترنت (Google)", value=False)
+    else:
+        web_search = False
+        st.caption("البحث المباشر غير متاح حالياً مع Groq.")
     if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -75,7 +86,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
     st.divider()
-    st.caption("Private login is enabled. The AI uses the server-side Gemini key configured in hosting Secrets.")
+    st.caption("Private login is enabled. API keys stay private in hosting Secrets.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -91,8 +102,10 @@ if question:
     with st.chat_message("user"):
         st.markdown(question)
 
-    if not GEMINI_API_KEY:
-        warning = "خاص المسؤول يضيف GEMINI_API_KEY فـ Secrets ديال الاستضافة باش يخدم الذكاء الاصطناعي."
+    active_key = GEMINI_API_KEY if provider == "Gemini" else GROQ_API_KEY
+    if not active_key:
+        secret_name = "GEMINI_API_KEY" if provider == "Gemini" else "GROQ_API_KEY"
+        warning = f"خاص تزيد {secret_name} فـ Secrets ديال الاستضافة باش يخدم هاد المزوّد."
         with st.chat_message("assistant"):
             st.warning(warning)
         st.session_state.messages.append({"role": "assistant", "content": warning})
@@ -114,36 +127,61 @@ if question:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    client = genai.Client(api_key=GEMINI_API_KEY)
-                    response = None
-                    last_error = None
-                    # Retry temporary provider overload (HTTP 503) up to three times.
-                    for attempt in range(3):
-                        try:
-                            request_config = {"system_instruction": system_instruction}
-                            if web_search:
-                                request_config["tools"] = [
-                                    types.Tool(google_search=types.GoogleSearch())
-                                ]
-                            response = client.models.generate_content(
-                                model=model,
-                                contents=history,
-                                config=request_config,
-                            )
-                            break
-                        except Exception as e:
-                            last_error = e
-                            if "503" in str(e) and attempt < 2:
-                                time.sleep(2 ** (attempt + 1))
-                                continue
-                            raise
-                    if response is None and last_error is not None:
-                        raise last_error
-                    answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
+                    if provider == "Gemini":
+                        client = genai.Client(api_key=GEMINI_API_KEY)
+                        response = None
+                        last_error = None
+                        for attempt in range(3):
+                            try:
+                                request_config = {"system_instruction": system_instruction}
+                                if web_search:
+                                    request_config["tools"] = [
+                                        types.Tool(google_search=types.GoogleSearch())
+                                    ]
+                                response = client.models.generate_content(
+                                    model=model,
+                                    contents=history,
+                                    config=request_config,
+                                )
+                                break
+                            except Exception as e:
+                                last_error = e
+                                if "503" in str(e) and attempt < 2:
+                                    time.sleep(2 ** (attempt + 1))
+                                    continue
+                                raise
+                        if response is None and last_error is not None:
+                            raise last_error
+                        answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
+                    else:
+                        messages = [{"role": "system", "content": system_instruction}]
+                        for item in st.session_state.messages:
+                            messages.append({
+                                "role": "assistant" if item["role"] == "assistant" else "user",
+                                "content": item["content"],
+                            })
+                        payload = json.dumps({
+                            "model": model,
+                            "messages": messages,
+                            "temperature": 0.7,
+                            "max_tokens": 2048,
+                        }).encode("utf-8")
+                        req = urllib.request.Request(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            data=payload,
+                            headers={
+                                "Authorization": f"Bearer {GROQ_API_KEY}",
+                                "Content-Type": "application/json",
+                            },
+                            method="POST",
+                        )
+                        with urllib.request.urlopen(req, timeout=60) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                        answer = data["choices"][0]["message"]["content"] or "ماقدرتش نولد جواب. عاود جرّب."
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
                 except Exception as e:
-                    # Show the provider error for troubleshooting, while masking the secret key.
                     safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
-                    st.error("وقع مشكل فالربط مع Gemini. تفاصيل الخطأ:")
+                    safe_error = safe_error.replace(GROQ_API_KEY, "[API KEY HIDDEN]")
+                    st.error(f"وقع مشكل فالربط مع {provider}. تفاصيل الخطأ:")
                     st.code(safe_error[:1500])
