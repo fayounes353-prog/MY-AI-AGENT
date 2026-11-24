@@ -860,12 +860,11 @@ with st.expander("1️⃣ وكيل البحث — كيقلب على الموضو
         if agent_ready():
             try:
                 with st.spinner("وكيل البحث كيقلب..."):
-                    research, clips = agent_social_scout(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+                    research = search_anything_on_web(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
                 st.session_state["agent_research"] = research
-                st.session_state["agent_clips"] = clips
                 st.success("وكيل البحث سالا.")
                 st.markdown(research)
-                st.caption(f"ملفات فيديو مرشحة من Wikimedia: {len(clips)}")
+                st.caption("نتائج البحث النصي محفوظة؛ شغّل وكيل الفيديوهات بشكل مستقل للبحث عن اللقطات.")
             except Exception as exc: st.error("وكيل البحث: " + str(exc)[:1500])
     if st.session_state["agent_research"]:
         st.text_area("نتيجة البحث المحفوظة", st.session_state["agent_research"], height=160, key="research_preview")
@@ -943,19 +942,22 @@ if st.button("🚀 شغّل الفريق كامل بالترتيب", type="prima
     if agent_ready():
         try:
             progress = st.progress(0, text="1/6 — البحث...")
-            research, clips = agent_social_scout(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
-            st.session_state["agent_research"], st.session_state["agent_clips"] = research, clips
-            progress.progress(1/6, text="2/6 — السيناريو...")
+            research = search_anything_on_web(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+            st.session_state["agent_research"] = research
+            progress.progress(1/6, text="2/6 — البحث عن الفيديوهات...")
+            clips = search_reusable_video_clips(team_topic.strip() + " video", limit=12)
+            st.session_state["agent_clips"] = clips
+            progress.progress(2/6, text="3/6 — السيناريو...")
             script = agent_write_script(team_topic.strip(), research, team_language, team_duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
             st.session_state["agent_script"] = script
-            progress.progress(2/6, text="3/6 — التعليق الصوتي...")
+            progress.progress(3/6, text="4/6 — التعليق الصوتي...")
             voice = agent_create_voiceover_bytes(script, team_language)
             st.session_state["agent_voice"] = voice
-            progress.progress(3/6, text="4/6 — المونتاج...")
+            progress.progress(4/6, text="5/6 — المونتاج...")
             video, used, note = agent_edit_video(team_topic.strip(), script, clips, team_duration, team_language, team_source_videos, voice)
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
-            progress.progress(5/6, text="5/6 — التحقق...")
+            progress.progress(5/6, text="6/6 — التحقق...")
             verification = agent_verify_output(video, script, team_duration, GEMINI_API_KEY)
             st.session_state["agent_verify"] = verification
             progress.progress(1.0, text="6/6 — اكتمل الفريق.")
