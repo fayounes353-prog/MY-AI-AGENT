@@ -526,6 +526,72 @@ with st.sidebar:
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
+st.subheader("🧠 Agent Team — كتب الموضوع وخلي الوكلاء يخدمو")
+st.caption("كتب غير الموضوع (مثلاً GTA 6). الوكلاء كيقلبو على الأخبار والمصادر، كيجمعو روابط الفيديوهات والمواد المرئية، كيكتبو السيناريو، كيديرو الترجمة/التعليق الصوتي، وكيخرجو MP4 للمراجعة.")
+team_topic = st.text_input("الموضوع", placeholder="مثلاً: GTA 6")
+team_language = st.selectbox("لغة الفيديو", ["العربية", "Français", "English"], index=0, key="team_language")
+if st.button("🚀 شغّل جميع الوكلاء وصايب الفيديو", type="primary", use_container_width=True):
+    if not team_topic.strip():
+        st.warning("كتب الموضوع أولاً.")
+    else:
+        try:
+            topic = team_topic.strip()
+            lang_code = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language]
+            with st.spinner("1/5 وكيل البحث: كيجمع الأخبار والمصادر والروابط..."):
+                research = search_anything_on_web(topic + " latest news official website trailer video", GEMINI_API_KEY)
+                clips = search_reusable_video_clips(topic + " related video", limit=8)
+            with st.spinner("2/5 وكيل التحرير: كيكتب سيناريو اعتماداً على البحث..."):
+                if GEMINI_API_KEY:
+                    try:
+                        draft = research_and_write_script(topic, GEMINI_API_KEY, "gemini-2.5-flash")
+                    except Exception:
+                        draft = research_with_openrouter_rss(topic, OPENROUTER_API_KEY) if OPENROUTER_API_KEY else research
+                elif OPENROUTER_API_KEY:
+                    draft = research_with_openrouter_rss(topic, OPENROUTER_API_KEY)
+                else:
+                    draft = research
+            with st.spinner("3/5 وكيل الترجمة: كيحضّر النص باللغة المختارة..."):
+                if lang_code != "ar" and GEMINI_API_KEY:
+                    try:
+                        client = genai.Client(api_key=GEMINI_API_KEY)
+                        translated = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents="Translate this video script into " + team_language + ". Preserve facts, links and the separate sources section. Do not add facts.\n\n" + draft
+                        )
+                        if translated.text:
+                            draft = translated.text
+                    except Exception:
+                        st.warning("تعذرت الترجمة الآلية؛ غادي نستعمل النص الأصلي.")
+            with st.spinner("4/5 وكيل الصوت والمونتاج: كينشئ التعليق الصوتي ويركب الفيديو..."):
+                video_bytes = build_vertical_video(topic, draft, language=lang_code)
+            st.session_state["team_video"] = video_bytes
+            st.session_state["team_script"] = draft
+            st.session_state["team_research"] = research
+            st.session_state["team_clips"] = clips
+            st.session_state["team_topic"] = topic
+            st.success("سالاو الوكلاء الخدمة. الفيديو واجد للمشاهدة والتحميل والمراجعة.")
+        except Exception as team_error:
+            safe = str(team_error).replace(GEMINI_API_KEY, "[API KEY HIDDEN]").replace(OPENROUTER_API_KEY, "[API KEY HIDDEN]")
+            st.error("ما كملش الفريق المهمة. شوف تفاصيل الخطأ وجرب مرة أخرى.")
+            st.code(safe[:1400])
+
+if st.session_state.get("team_video"):
+    st.markdown("### 🎬 الفيديو النهائي")
+    st.video(st.session_state["team_video"])
+    st.download_button("⬇️ حمّل الفيديو MP4", st.session_state["team_video"], file_name="MY_AI_AGENT_video.mp4", mime="video/mp4", use_container_width=True)
+    with st.expander("📝 السيناريو والمصادر اللي اعتمد عليها"):
+        st.text(st.session_state.get("team_script", ""))
+    with st.expander("🔎 نتائج البحث"):
+        st.markdown(st.session_state.get("team_research", ""))
+    with st.expander("🎞️ لقطات فيديو ومواد مرئية مرشحة"):
+        clips = st.session_state.get("team_clips", [])
+        if not clips:
+            st.info("ما تلقاتش لقطات فيديو قابلة لإعادة الاستخدام فـ Wikimedia Commons. استعمل روابط البحث للمصادر الأخرى.")
+        for clip in clips:
+            st.markdown(f"**{clip['title']}** — {clip['license']} — {clip['artist']}")
+            if clip.get("page"):
+                st.markdown(f"[المصدر والترخيص]({clip['page']}) · [ملف الفيديو]({clip['url']})")
+
 st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
 st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
 with st.form("universal_search_form"):
