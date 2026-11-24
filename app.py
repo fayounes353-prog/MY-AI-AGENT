@@ -505,10 +505,10 @@ def agent_write_script(topic, research, language, target_seconds, api_key):
 
 def agent_voiceover(script, language, temp_dir):
     """Extract the narration and create its spoken audio track."""
-    narration = re.split(r"(?im)^\\s*(?:sources|المصادر|المراجع)\\s*[:：]?.*$", script)[0].strip()
-    narration = re.sub(r"(?im)^\\s*(?:narration|التعليق الصوتي|النص)\\s*[:：]\\s*", "", narration)
-    narration = re.sub(r"(?im)^\\s*(?:title|العنوان)\\s*[:：]\\s*.*$", "", narration)
-    narration = re.sub(r"(?m)^\\s*#+\\s*", "", narration)
+    narration = re.split(r"(?im)^\s*(?:sources|المصادر|المراجع)\s*[:：]?.*$", script)[0].strip()
+    narration = re.sub(r"(?im)^\s*(?:narration|التعليق الصوتي|النص)\s*[:：]\s*", "", narration)
+    narration = re.sub(r"(?im)^\s*(?:title|العنوان)\s*[:：]\s*.*$", "", narration)
+    narration = re.sub(r"(?m)^\s*#+\s*", "", narration)
     narration = re.sub(r"[*_]", "", narration).strip()
     if len(narration) < 30:
         raise RuntimeError("النص الصوتي قصير بزاف أو ما قدرناش نستخرجوه.")
