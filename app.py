@@ -130,6 +130,16 @@ def search_reusable_video_clips(query, limit=8):
         if extension not in (".webm", ".ogv", ".ogg", ".mp4", ".mpeg", ".mpg"):
             continue
         metadata = info.get("extmetadata") or {}
+        # Only keep Commons files whose title matches the requested topic.
+        stop_words = {"the","and","for","with","from","video","footage","filetype","les","des","une","pour","avec","sur","من","في","عن","على","ديال","مع","هذا","هذه"}
+        topic_terms = {t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", query)
+                       if len(t) > 2 and t.lower() not in stop_words}
+        title_text = str(page.get("title", "")).lower()
+        if topic_terms:
+            matched = {t for t in topic_terms if t in title_text}
+            minimum_matches = 1 if len(topic_terms) == 1 else 2
+            if len(matched) < minimum_matches:
+                continue
         def metadata_value(key):
             value = metadata.get(key, {}).get("value", "")
             return re.sub(r"<[^>]+>", "", str(value)).strip()
