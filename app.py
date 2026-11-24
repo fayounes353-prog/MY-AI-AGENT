@@ -144,6 +144,30 @@ def search_reusable_video_clips(query, limit=8):
     return results
 
 
+
+def search_anything_on_web(query, api_key):
+    """Use Gemini grounded Google Search for broad web research on any user query."""
+    client = genai.Client(api_key=api_key)
+    prompt = (
+        "ابحث في الإنترنت بحثاً واسعاً عن هذا الطلب: " + query + "\\n"
+        "استعمل Google Search للعثور على صفحات ومصادر حقيقية وحديثة. "
+        "إذا كان الموضوع لعبة أو فيلم أو فيديو، ابحث كذلك عن المقطع الرسمي، "
+        "الموقع الرسمي، الأخبار، والمصادر المفيدة. "
+        "أجب بلغة المستخدم، وقدم خلاصة واضحة ثم روابط المصادر التي عثرت عليها. "
+        "فرّق بين المعلومة المؤكدة والإشاعة، ولا تخترع روابط أو نتائج. "
+        "إذا لم تجد نتيجة مطابقة، قل ذلك واقترح كلمات بحث بديلة."
+    )
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=prompt,
+        config={
+            "system_instruction": "أنت وكيل بحث على الإنترنت. ابحث قبل الإجابة، واستشهد بمصادر وروابط حقيقية.",
+            "tools": [types.Tool(google_search=types.GoogleSearch())],
+        },
+    )
+    return response.text or "ما رجع البحث بنتائج. جرّب صياغة أخرى."
+
+
 def make_video_slide(title, paragraph, output_path, index, total, image_path=None):
     width, height = 1080, 1920
     if image_path:
@@ -464,6 +488,39 @@ with st.sidebar:
         st.rerun()
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
+
+st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
+st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
+with st.form("universal_search_form"):
+    universal_query = st.text_input("شنو بغيتي نلقى؟", placeholder="مثلاً: GTA 6 gameplay trailer release date")
+    universal_submit = st.form_submit_button("🌍 قلب فكلشي", use_container_width=True)
+if universal_submit:
+    if not universal_query.strip():
+        st.warning("كتب شنو كتقلب عليه.")
+    elif not GEMINI_API_KEY:
+        st.error("خاص GEMINI_API_KEY يكون محفوظ فـ Streamlit Secrets باش نخدم البحث الذكي.")
+    else:
+        try:
+            with st.spinner("الوكيل كيقلب فالويب وكيجمع المعلومات والروابط..."):
+                universal_result = search_anything_on_web(universal_query.strip(), GEMINI_API_KEY)
+                st.session_state["universal_search_result"] = universal_result
+                st.session_state["universal_search_query"] = universal_query.strip()
+        except Exception as search_error:
+            st.error("البحث ما كملش. جرّب مرة أخرى.")
+            st.caption(str(search_error)[:500])
+
+if st.session_state.get("universal_search_result"):
+    st.markdown("### نتائج البحث: " + st.session_state.get("universal_search_query", ""))
+    st.markdown(st.session_state["universal_search_result"])
+    q_encoded = urllib.parse.quote_plus(st.session_state.get("universal_search_query", ""))
+    st.markdown("**زيد قلب مباشرة فمواقع أخرى:**")
+    st.markdown(
+        f"[Google] (https://www.google.com/search?q={q_encoded}) · "
+        f"[Google Videos](https://www.google.com/search?tbm=vid&q={q_encoded}) · "
+        f"[YouTube](https://www.youtube.com/results?search_query={q_encoded}) · "
+        f"[Internet Archive](https://archive.org/search?query={q_encoded}) · "
+        f"[Wikimedia Commons](https://commons.wikimedia.org/w/index.php?search={q_encoded})"
+    )
 
 st.subheader("🎞️ Video Search Agent — البحث عن مقاطع فيديو")
 st.caption("كيقلب فـ Wikimedia Commons على مقاطع فيديو قابلة لإعادة الاستخدام، وكيعرض المصدر والترخيص باش تراجع الشروط قبل النشر.")
