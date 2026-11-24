@@ -1081,6 +1081,20 @@ if st.session_state["agent_verify"]:
     st.markdown("**نتيجة التحقق:**")
     st.write(st.session_state["agent_verify"])
 
+# Keep the finished video visible outside the collapsed editor expander.
+if st.session_state.get("agent_video"):
+    st.divider()
+    st.subheader("🎬 الفيديو النهائي")
+    st.caption("الفيديو اللي تْصاوب وتْفحص — تقدر تشوفو هنا أو تحمّلو.")
+    st.video(st.session_state["agent_video"])
+    st.download_button(
+        "⬇️ حمّل الفيديو MP4",
+        data=st.session_state["agent_video"],
+        file_name="MY_AI_AGENT_video.mp4",
+        mime="video/mp4",
+        key="download_final_team_video",
+        use_container_width=True,
+    )
 
 st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
 st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
