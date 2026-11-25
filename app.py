@@ -1047,9 +1047,9 @@ with st.sidebar:
     st.divider()
     st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
-st.subheader("🎬 صايب فيديو ممتع على أي موضوع")
-st.caption("كتب الموضوع اللي بغيتي، والفريق غادي يبحث عليه، يلقى لقطات فيديو مرخّصة ومرتبطة به، يركّبها مع تعليق صوتي، ثم يفحص ملف MP4. الهدف فيديو قصير وممتع، ماشي عرض صور.")
-team_topic = st.text_input("الموضوع", placeholder="مثلاً: Les plus beaux buts des joueurs، السيارات الخارقة، قصص غريبة...", key="agent_topic")
+st.subheader("🍳 صايب فيديو وصفة طبخ")
+st.caption("استوديو متخصص في وصفات الطبخ: يبحث عن المقادير وطريقة التحضير، ثم يحاول إيجاد لقطات طبخ حقيقية مرتبطة بالوصفة ويضيف تعليقاً صوتياً. إذا لم يجد لقطات مناسبة، يوقف المونتاج بدل استعمال فيديو عشوائي.")
+team_topic = st.text_input("اسم الوصفة", placeholder="مثلاً: طاجين الدجاج بالزيتون، الحريرة، البسطيلة، Pancakes...", key="agent_topic")
 team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
 team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
 team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية", key="agent_duration")
@@ -1067,19 +1067,19 @@ if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
 def agent_ready():
     if not team_topic.strip():
-        st.error("كتب الموضوع أولاً.")
+        st.error("كتب اسم الوصفة أولاً.")
         return False
     # Public RSS research plus licensed-footage search and gTTS can run without paid AI API keys.
     return True
 
 st.markdown("#### الوكلاء والمهام ديالهم")
-with st.expander("1️⃣ وكيل البحث — كيقلب على الموضوع بلا تخصيص مسبق", expanded=True):
-    st.write("كيبحث فالويب على أي موضوع: رياضة، ألعاب، أخبار، تكنولوجيا، قصص... وكيجمع الروابط والمعلومات. ما كيعتمدش على GTA أو كرة القدم فقط.")
+with st.expander("1️⃣ وكيل البحث — الوصفة والمقادير", expanded=True):
+    st.write("كيبحث على الوصفة اللي كتبتي: المقادير والكميات وطريقة التحضير ووقت الطهي، ويجمع المصادر. ما خاصوش يخترع مقادير أو خطوات.")
     if st.button("شغّل وكيل البحث", key="run_research"):
         if agent_ready():
             try:
                 with st.spinner("وكيل البحث كيقلب..."):
-                    research = search_anything_on_web(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+                    research = search_anything_on_web("وصفة " + team_topic.strip() + " المقادير الكميات طريقة التحضير وقت الطهي", GEMINI_API_KEY, OPENROUTER_API_KEY)
                 st.session_state["agent_research"] = research
                 st.success("وكيل البحث سالا.")
                 st.markdown(research)
@@ -1088,14 +1088,14 @@ with st.expander("1️⃣ وكيل البحث — كيقلب على الموضو
     if st.session_state["agent_research"]:
         st.text_area("نتيجة البحث المحفوظة", st.session_state["agent_research"], height=160, key="research_preview")
 
-with st.expander("2️⃣ وكيل العثور على الفيديوهات المرخصة"):
-    st.write("كيبحث على لقطات حقيقية مرتبطة بنفس الموضوع من مكتبات تسمح بإعادة الاستعمال. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
+with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
+    st.write("كيبحث على لقطات حقيقية لتحضير نفس الوصفة أو مكوناتها وتقنيات الطهي من مكتبات تسمح بإعادة الاستعمال. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
     if st.button("شغّل وكيل الفيديوهات", key="run_clips"):
-        if not team_topic.strip(): st.error("كتب الموضوع أولاً.")
+        if not team_topic.strip(): st.error("كتب اسم الوصفة أولاً.")
         else:
             try:
                 with st.spinner("كيقلب على فيديوهات قابلة للاستعمال..."):
-                    st.session_state["agent_clips"] = agent_find_video_sources(team_topic.strip(), limit=12)
+                    st.session_state["agent_clips"] = agent_find_video_sources(team_topic.strip() + " cooking preparation ingredients", limit=12)
                 st.success(f"لقى {len(st.session_state['agent_clips'])} فيديو مرشح.")
             except Exception as exc: st.error("وكيل الفيديوهات: " + str(exc)[:1200])
     for clip in st.session_state["agent_clips"][:12]:
@@ -1132,10 +1132,10 @@ if st.button("🎬 صايب الفيديو دابا", type="primary", use_contai
     if team_topic.strip():
         try:
             progress = st.progress(0, text="1/4 — البحث...")
-            research = search_anything_on_web(team_topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+            research = search_anything_on_web("وصفة " + team_topic.strip() + " المقادير الكميات طريقة التحضير وقت الطهي", GEMINI_API_KEY, OPENROUTER_API_KEY)
             st.session_state["agent_research"] = research
             progress.progress(1/4, text="2/4 — البحث عن الفيديوهات...")
-            clips = agent_find_video_sources(team_topic.strip(), limit=12)
+            clips = agent_find_video_sources(team_topic.strip() + " cooking preparation ingredients", limit=12)
             st.session_state["agent_clips"] = clips
             progress.progress(2/4, text="3/4 — المونتاج...")
             video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), research, team_language), team_language)
@@ -1149,7 +1149,7 @@ if st.button("🎬 صايب الفيديو دابا", type="primary", use_contai
         except Exception as exc:
             st.error("توقف الفريق: " + str(exc)[:1800])
     else:
-        st.error("كتب الموضوع أولاً.")
+        st.error("كتب اسم الوصفة أولاً.")
 
 if st.session_state["agent_verify"]:
     st.markdown("**نتيجة التحقق:**")
