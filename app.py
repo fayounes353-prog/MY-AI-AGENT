@@ -831,7 +831,46 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
                     except Exception:
                         pass
                 errors.append("OpenRouter " + model_name + " المحاولة " + str(attempt_no) + ": " + detail[:500])
-    raise RuntimeError("تعذر إنشاء السيناريو. " + " | ".join(errors or ["ما كاين حتى API key صالح فـ Streamlit Secrets."]))
+    # Free offline fallback: keep the workflow moving when all hosted model quotas are exhausted.
+    # This is a clearly generic starter narration, not a claim that AI research or fact-checking succeeded.
+    if language == "ar":
+        title = "دليل مبسط حول " + topic
+        narration = (
+            "مرحبا بكم. اليوم غادي نهضرو على " + topic + ". "
+            "غادي نمشيو مع الموضوع خطوة بخطوة، بطريقة واضحة وسهلة المتابعة. "
+            "في البداية، كنحددو شنو محتاجين وكنوجدو كلشي قبل ما نبداو. "
+            "من بعد، كنركزو على المراحل الأساسية، وكنتابعو كل مرحلة بوحدها باش تكون النتيجة منظمة. "
+            "خدو وقتكم فكل خطوة، وردو البال للتفاصيل، حيث التفاصيل الصغيرة كتقدر تصنع الفرق. "
+            "وفي الأخير، كنراجعو النتيجة وكنشوفو واش وصلنا للهدف اللي بغيناه. "
+            "هاد الفيديو تقديم أولي للموضوع، ومن الأفضل التأكد من التفاصيل الخاصة به قبل النشر. "
+            "شكرا على المتابعة، ونلتاقاو في موضوع جديد."
+        )
+        sources = "سيناريو احتياطي عام تم إنشاؤه محلياً بعد تعذر خدمات الذكاء الاصطناعي؛ خاص مراجعة التفاصيل قبل النشر."
+    elif language == "fr":
+        title = "Guide pratique : " + topic
+        narration = (
+            "Bonjour et bienvenue. Aujourd'hui, nous allons découvrir " + topic + ". "
+            "Nous allons avancer étape par étape, avec une présentation simple et facile à suivre. "
+            "Commençons par définir ce dont nous avons besoin et préparer les éléments nécessaires. "
+            "Ensuite, concentrons-nous sur les étapes essentielles, une à une, en prêtant attention aux détails. "
+            "À la fin, prenons un moment pour vérifier le résultat et voir s'il répond à notre objectif. "
+            "Cette narration est une introduction générale : les informations précises doivent être vérifiées avant publication. "
+            "Merci d'avoir suivi cette vidéo."
+        )
+        sources = "Script de secours générique généré localement après épuisement des services IA ; vérification nécessaire avant publication."
+    else:
+        title = "A simple guide to " + topic
+        narration = (
+            "Welcome. Today, we are taking a closer look at " + topic + ". "
+            "We will go through the subject step by step in a clear and practical way. "
+            "First, identify what is needed and prepare the essentials. "
+            "Then focus on the main stages one at a time, paying attention to the details. "
+            "At the end, review the result and check whether it meets the goal. "
+            "This is a general introductory narration. Specific facts and instructions should be verified before publication. "
+            "Thanks for watching."
+        )
+        sources = "Generic local fallback script created because hosted AI services were unavailable; verify specific details before publishing."
+    return "TITLE: " + title + "\\nNARRATION: " + narration + "\\nSOURCES: " + sources
 
 
 def agent_create_voiceover_bytes(script, language):
