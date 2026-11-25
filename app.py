@@ -1,8 +1,6 @@
 import os
 import hmac
-import time
 import json
-import csv
 import io
 import re
 import subprocess
@@ -13,9 +11,6 @@ import xml.etree.ElementTree as ET
 import streamlit as st
 from google import genai
 from google.genai import types
-from pypdf import PdfReader
-from docx import Document
-from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 from gtts import gTTS
 import imageio_ffmpeg
@@ -29,28 +24,6 @@ def get_secret(name, default=""):
         return str(st.secrets.get(name, default))
     except Exception:
         return os.getenv(name, default)
-
-def extract_file(uploaded):
-    name = uploaded.name
-    raw = uploaded.getvalue()
-    ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
-    if ext in ("txt", "md", "csv", "json", "py", "html", "xml", "log"):
-        return raw.decode("utf-8", errors="replace")
-    if ext == "pdf":
-        reader = PdfReader(io.BytesIO(raw))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    if ext == "docx":
-        doc = Document(io.BytesIO(raw))
-        return "\n".join(p.text for p in doc.paragraphs)
-    if ext == "xlsx":
-        book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-        chunks = []
-        for sheet in book.worksheets:
-            chunks.append(f"Sheet: {sheet.title}")
-            for row in sheet.iter_rows(values_only=True):
-                chunks.append(" | ".join("" if v is None else str(v) for v in row))
-        return "\n".join(chunks)
-    raise ValueError("نوع الملف غير مدعوم. استعمل PDF أو DOCX أو XLSX أو TXT أو CSV أو MD.")
 
 def rtl(text):
     try:
@@ -1046,7 +1019,7 @@ def agent_ready():
     return True
 
 st.markdown("#### الوكلاء والمهام ديالهم")
-with st.expander("1️⃣ وكيل البحث — الوصفة والمقادير", expanded=True):
+with st.expander("1️⃣ وكيل البحث — الوصفة والمقادير", expanded=False):
     st.write("كيبحث على الوصفة اللي كتبتي: المقادير والكميات وطريقة التحضير ووقت الطهي، ويجمع المصادر. ما خاصوش يخترع مقادير أو خطوات.")
     if st.button("شغّل وكيل البحث", key="run_research"):
         if agent_ready():
@@ -1085,10 +1058,6 @@ with st.expander("3️⃣ وكيل المونتاج"):
             st.session_state["team_edit_note"] = note
             st.success("المونتاج واجد.")
         except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
-    if st.session_state["agent_video"]:
-        st.video(st.session_state["agent_video"])
-        st.download_button("تحميل الفيديو MP4", st.session_state["agent_video"], "MY_AI_AGENT_video.mp4", "video/mp4")
-
 with st.expander("4️⃣ وكيل التحقق"):
     st.write("كيختبر ملف MP4 ومدته؛ بلا مراجعة سيناريو لأن مرحلة السيناريو محذوفة.")
     if st.button("شغّل وكيل التحقق", key="run_verify"):
