@@ -926,7 +926,7 @@ def agent_download_link_video(url, temp_dir):
     template=os.path.join(temp_dir,"linked_source.%(ext)s")
     # Prefer the highest available video quality with audio; fall back to a
     # single-file format when the platform does not provide separate streams.
-    options={"outtmpl":template,"format":"bestvideo*+bestaudio/best",
+    options={"outtmpl":template,"format":"best[ext=mp4]/best/bestvideo*+bestaudio",
              "merge_output_format":"mp4",
              "ffmpeg_location":imageio_ffmpeg.get_ffmpeg_exe(),
              "noplaylist":True,"socket_timeout":60,
