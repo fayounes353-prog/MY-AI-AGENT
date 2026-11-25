@@ -995,8 +995,8 @@ if not APP_PASSWORD:
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if not st.session_state.authenticated:
-    st.title("🔐 MY AI AGENT")
-    st.caption("Private AI assistant")
+    st.title("🍳 CUISINE VIDEO STUDIO")
+    st.caption("استوديو فيديوهات وصفات الطبخ")
     with st.form("login_form"):
         password = st.text_input("كلمة المرور / Password", type="password")
         submitted = st.form_submit_button("دخول / Sign in", use_container_width=True)
@@ -1009,43 +1009,16 @@ if not st.session_state.authenticated:
     st.stop()
 
 st.markdown('<div class="hero">', unsafe_allow_html=True)
-st.title("🤖 MY AI AGENT")
-st.caption("مساعدك الذكي — كيساعدك تنجز المهام، يحلل الملفات ويصاوب الفيديوهات")
+st.title("🍳 CUISINE VIDEO STUDIO")
+st.caption("استوديو متخصص في إعداد فيديوهات وصفات الطبخ")
 st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("⚙️ Settings")
-    provider = st.selectbox("AI provider", ["Gemini", "OpenRouter (free models)"])
-    if provider == "Gemini":
-        model = st.selectbox("AI model", ["gemini-3.5-flash-lite", "gemini-3.8-flash"])
-        web_search = st.checkbox("البحث في الإنترنت (Google)", value=False)
-    else:
-        model = "openrouter/free"
-        web_search = False
-        st.caption("البحث المباشر متاح حالياً مع Gemini فقط.")
-    mode = st.selectbox("Assistant mode", [
-        "General assistant", "Writing", "Programming",
-        "Study & explanation", "Ideas & content", "Business & accounting"
-    ])
-    st.divider()
-    st.subheader("📎 File analysis")
-    uploaded_files = st.file_uploader(
-        "حمّل ملفات باش نحللها",
-        type=["pdf", "docx", "xlsx", "txt", "csv", "md", "json", "py"],
-        accept_multiple_files=True,
-        help="يمكن تحميل PDF وWord وExcel وTXT وCSV وMarkdown."
-    )
-    if uploaded_files:
-        st.caption(f"{len(uploaded_files)} ملف/ملفات جاهزة للتحليل.")
-    if st.button("Clear conversation", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
-    if st.button("Log out", use_container_width=True):
+    st.header("⚙️ الإعدادات")
+    st.caption("MY AI AGENT — Cuisine")
+    if st.button("تسجيل الخروج", use_container_width=True):
         st.session_state.authenticated = False
-        st.session_state.messages = []
         st.rerun()
-    st.divider()
-    st.caption("مفاتيح API محفوظة بشكل سري في Streamlit Secrets.")
 
 st.subheader("🍳 صايب فيديو وصفة طبخ")
 st.caption("استوديو متخصص في وصفات الطبخ: يبحث عن المقادير وطريقة التحضير، ثم يحاول إيجاد لقطات طبخ حقيقية مرتبطة بالوصفة ويضيف تعليقاً صوتياً. إذا لم يجد لقطات مناسبة، يوقف المونتاج بدل استعمال فيديو عشوائي.")
@@ -1164,245 +1137,9 @@ if st.session_state.get("agent_video"):
     st.download_button(
         "⬇️ حمّل الفيديو MP4",
         data=st.session_state["agent_video"],
-        file_name="MY_AI_AGENT_video.mp4",
+        file_name="Cuisine_recipe_video.mp4",
         mime="video/mp4",
         key="download_final_team_video",
         use_container_width=True,
     )
 
-st.subheader("🌐 Universal Search Agent — قلب فكل الإنترنت")
-st.caption("كتب أي موضوع: لعبة، فيلم، خبر، منتوج، شخص، فيديو... والوكيل غادي يبحث فالويب باستعمال Google Search، ويعطيك روابط مباشرة لمصادر أخرى.")
-with st.form("universal_search_form"):
-    universal_query = st.text_input("شنو بغيتي نلقى؟", placeholder="مثلاً: GTA 6 gameplay trailer release date")
-    universal_submit = st.form_submit_button("🌍 قلب فكلشي", use_container_width=True)
-if universal_submit:
-    if not universal_query.strip():
-        st.warning("كتب شنو كتقلب عليه.")
-    else:
-        try:
-            with st.spinner("الوكيل كيقلب فالويب وكيجمع المعلومات والروابط..."):
-                universal_result = search_anything_on_web(universal_query.strip(), GEMINI_API_KEY)
-                st.session_state["universal_search_result"] = universal_result
-                st.session_state["universal_search_query"] = universal_query.strip()
-        except Exception as search_error:
-            st.error("البحث ما كملش. جرّب مرة أخرى.")
-            st.caption("تفاصيل الخطأ: " + str(search_error)[:700])
-
-if st.session_state.get("universal_search_result"):
-    st.markdown("### نتائج البحث: " + st.session_state.get("universal_search_query", ""))
-    st.markdown(st.session_state["universal_search_result"])
-    q_encoded = urllib.parse.quote_plus(st.session_state.get("universal_search_query", ""))
-    st.markdown("**زيد قلب مباشرة فمواقع أخرى:**")
-    st.markdown(
-        f"[Google](https://www.google.com/search?q={q_encoded}) · "
-        f"[Google Videos](https://www.google.com/search?tbm=vid&q={q_encoded}) · "
-        f"[YouTube](https://www.youtube.com/results?search_query={q_encoded}) · "
-        f"[Internet Archive](https://archive.org/search?query={q_encoded}) · "
-        f"[Wikimedia Commons](https://commons.wikimedia.org/w/index.php?search={q_encoded})"
-    )
-
-st.subheader("🎞️ Video Search Agent — البحث عن مقاطع فيديو")
-st.caption("كيقلب فـ Wikimedia Commons على مقاطع فيديو قابلة لإعادة الاستخدام، وكيعرض المصدر والترخيص باش تراجع الشروط قبل النشر.")
-with st.form("video_search_form"):
-    clip_query = st.text_input("شنو نوع الفيديو اللي كتقلب عليه؟", placeholder="مثلاً: Casablanca street, ocean waves, football stadium")
-    search_submitted = st.form_submit_button("🔎 قلب على فيديوهات", use_container_width=True)
-if search_submitted:
-    if not clip_query.strip():
-        st.warning("كتب موضوع البحث أولاً.")
-    else:
-        try:
-            with st.spinner("Agent البحث كيقلب على مقاطع مناسبة..."):
-                st.session_state["video_clip_results"] = search_reusable_video_clips(clip_query.strip())
-                st.session_state["video_clip_query"] = clip_query.strip()
-        except Exception as search_error:
-            st.error("ما قدرش Agent البحث يوصل للمكتبة دابا.")
-            st.caption(str(search_error)[:500])
-
-if "video_clip_results" in st.session_state:
-    clip_results = st.session_state["video_clip_results"]
-    st.caption(f"نتائج البحث عن: {st.session_state.get('video_clip_query', '')} — {len(clip_results)} مقطع")
-    if not clip_results:
-        st.info("ما تلقاو حتى مقاطع فيديو مطابقة. جرّب كلمات بحث بالإنجليزية.")
-    for clip_index, clip in enumerate(clip_results):
-        with st.expander(f"🎬 {clip['title']}"):
-            st.write("الترخيص:", clip["license"])
-            st.write("صاحب العمل / النسبة:", clip["artist"])
-            if clip["page"]:
-                st.markdown(f"[فتح صفحة المصدر ومراجعة شروط الاستعمال]({clip['page']})")
-            st.markdown(f"[فتح ملف الفيديو الأصلي]({clip['url']})")
-            if clip_index < 3:
-                st.video(clip["url"])
-
-st.subheader("🎬 CHNO WA9E3 — Video Studio")
-st.caption("الوكيل يختار موضوعاً إخبارياً عاماً، يبحث عنه، يكتب السيناريو ويصنع الفيديو بالصوت والصور في خطوة واحدة.")
-auto_topic = st.text_input(
-    "المجال (اختياري)",
-    value=st.session_state.get("auto_video_topic", "آخر أخبار المغرب والعالم"),
-    help="تقدر تخليه كما هو أو تكتب مجالاً بحال التكنولوجيا أو الرياضة."
-)
-if st.button("🤖 صايب ليا فيديو جديد بوحدك", type="primary", use_container_width=True):
-    if not GEMINI_API_KEY:
-        st.error("خاص GEMINI_API_KEY يبقى محفوظاً فـ Secrets.")
-    elif not auto_topic.strip():
-        st.warning("كتب المجال اللي بغيتي.")
-    else:
-        try:
-            with st.spinner("1/2 كنقلب على الأخبار وكنكتب السيناريو..."):
-                try:
-                    draft = research_and_write_script(
-                        auto_topic.strip(), GEMINI_API_KEY, "gemini-3.5-flash-lite"
-                    )
-                except Exception as gemini_error:
-                    if "429" not in str(gemini_error) and "RESOURCE_EXHAUSTED" not in str(gemini_error):
-                        raise
-                    if not OPENROUTER_API_KEY:
-                        raise RuntimeError(
-                            "حصة Gemini سالات (429)، وما كاينش OPENROUTER_API_KEY محفوظ كبديل. "
-                            "زيد مفتاح OpenRouter فـ Streamlit Secrets أو تسنى حتى ترجع الحصة."
-                        )
-                    st.warning("Gemini وصل للحد المجاني؛ كنحوّل تلقائياً إلى OpenRouter مع عناوين Google News RSS.")
-                    draft = research_with_openrouter_rss(auto_topic.strip(), OPENROUTER_API_KEY)
-            if len(draft.strip()) < 40:
-                raise ValueError("البحث ما رجعش سيناريو كافي. عاود المحاولة.")
-            st.session_state["video_research_draft"] = draft
-            st.session_state["video_topic"] = auto_topic.strip()
-            with st.spinner("2/2 كنركّب الفيديو بالصوت والصور والحركة..."):
-                video_bytes = build_vertical_video(
-                    auto_topic.strip(), draft.strip()
-                )
-            st.session_state["generated_video"] = video_bytes
-            st.session_state["generated_video_script"] = draft
-            st.success("الفيديو تصاوب بنجاح. تقدر تشوفو وتحملو من هنا.")
-        except Exception as e:
-            safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
-            st.error("ما كملش إنشاء الفيديو هاد المرة.")
-            st.code(safe_error[:1600])
-
-if st.session_state.get("generated_video"):
-    st.video(st.session_state["generated_video"])
-    st.download_button(
-        "⬇️ حمّل الفيديو MP4",
-        data=st.session_state["generated_video"],
-        file_name="CHNO_WA9E3_video.mp4",
-        mime="video/mp4",
-        use_container_width=True
-    )
-    with st.expander("شوف السيناريو والمصادر"):
-        st.text(st.session_state.get("generated_video_script", ""))
-
-st.caption("هاد الزر كيدير البحث والسيناريو والمونتاج دفعة وحدة. خاص الموقع يبقى محلول أثناء الخدمة. النشر التلقائي وجدولة الفيديوهات مازال ما تفعّلوش.");
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-if st.session_state.messages:
-    last_assistant = next((m["content"] for m in reversed(st.session_state.messages) if m["role"] == "assistant"), None)
-    if last_assistant:
-        st.download_button("⬇️ Télécharger آخر جواب", data=last_assistant, file_name="my-ai-agent-answer.txt", mime="text/plain")
-
-question = st.chat_input("كتب المهمة اللي بغيتي الوكيل ينجزها...")
-
-if question:
-    st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.markdown(question)
-
-    attachment_context = ""
-    if uploaded_files:
-        parts = []
-        for uploaded in uploaded_files:
-            try:
-                extracted = extract_file(uploaded)
-                parts.append(f"\n--- FILE: {uploaded.name} ---\n{extracted[:30000]}")
-            except Exception as e:
-                parts.append(f"\n--- FILE: {uploaded.name} ---\nتعذر قراءة الملف: {e}")
-        attachment_context = "\n\nمحتوى الملفات المرفقة (استعمله للإجابة على طلب المستخدم):\n" + "\n".join(parts)
-
-    user_prompt = question + attachment_context
-    active_key = GEMINI_API_KEY if provider == "Gemini" else OPENROUTER_API_KEY
-    if not active_key:
-        secret_name = "GEMINI_API_KEY" if provider == "Gemini" else "OPENROUTER_API_KEY"
-        warning = f"خاص تزيد {secret_name} فـ Secrets ديال الاستضافة."
-        with st.chat_message("assistant"):
-            st.warning(warning)
-        st.session_state.messages.append({"role": "assistant", "content": warning})
-    else:
-        system_instruction = (
-            "You are MY AI AGENT, a practical task assistant. Reply in the user's language; "
-            "for Moroccan Darija, use clear Moroccan Darija. Current mode: " + mode + ". "
-            "When asked to perform a task, do the work in your answer: draft the complete text, "
-            "analyze provided data, produce code, calculations, plans, or structured results. "
-            "For attached files, rely on their contents and mention if extraction appears incomplete. "
-            "Be honest: never claim to have sent messages, changed accounts, made purchases, or "
-            "performed actions outside this app unless a connected tool actually completed it. "
-            "Ask for confirmation before any consequential external action."
-        )
-        history = []
-        for item in st.session_state.messages[:-1]:
-            history.append({
-                "role": "user" if item["role"] == "user" else "model",
-                "parts": [{"text": item["content"]}],
-            })
-        history.append({"role": "user", "parts": [{"text": user_prompt}]})
-
-        with st.chat_message("assistant"):
-            with st.spinner("الوكيل كينفذ المهمة..."):
-                try:
-                    if provider == "Gemini":
-                        client = genai.Client(api_key=GEMINI_API_KEY)
-                        response = None
-                        last_error = None
-                        for attempt in range(3):
-                            try:
-                                request_config = {"system_instruction": system_instruction}
-                                if web_search:
-                                    request_config["tools"] = [types.Tool(google_search=types.GoogleSearch())]
-                                response = client.models.generate_content(
-                                    model=model, contents=history, config=request_config
-                                )
-                                break
-                            except Exception as e:
-                                last_error = e
-                                if "503" in str(e) and attempt < 2:
-                                    time.sleep(2 ** (attempt + 1))
-                                    continue
-                                raise
-                        if response is None and last_error is not None:
-                            raise last_error
-                        answer = response.text or "ماقدرتش نولد جواب. عاود جرّب."
-                    else:
-                        messages = [{"role": "system", "content": system_instruction}]
-                        for item in st.session_state.messages[:-1]:
-                            messages.append({
-                                "role": "assistant" if item["role"] == "assistant" else "user",
-                                "content": item["content"],
-                            })
-                        messages.append({"role": "user", "content": user_prompt})
-                        payload = json.dumps({
-                            "model": model, "messages": messages,
-                            "temperature": 0.7, "max_tokens": 3000,
-                        }).encode("utf-8")
-                        req = urllib.request.Request(
-                            "https://openrouter.ai/api/v1/chat/completions",
-                            data=payload,
-                            headers={
-                                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                                "Content-Type": "application/json",
-                                "HTTP-Referer": "https://my-ai-agent.streamlit.app",
-                                "X-Title": "MY AI AGENT",
-                            },
-                            method="POST",
-                        )
-                        with urllib.request.urlopen(req, timeout=60) as resp:
-                            data = json.loads(resp.read().decode("utf-8"))
-                        answer = data["choices"][0]["message"]["content"] or "ماقدرتش نولد جواب. عاود جرّب."
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
-                except Exception as e:
-                    safe_error = str(e).replace(GEMINI_API_KEY, "[API KEY HIDDEN]")
-                    safe_error = safe_error.replace(OPENROUTER_API_KEY, "[API KEY HIDDEN]")
-                    st.error(f"وقع مشكل فالربط مع {provider}.")
-                    st.code(safe_error[:1500])
