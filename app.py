@@ -1155,15 +1155,21 @@ if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 if "agent_source_video_bytes" not in st.session_state: st.session_state["agent_source_video_bytes"] = b""
 if "agent_source_video_title" not in st.session_state: st.session_state["agent_source_video_title"] = ""
 
+# Clear a previously fetched source whenever the user changes the link.
+if st.session_state.get("agent_last_source_url", "") != team_source_url.strip():
+    st.session_state["agent_last_source_url"] = team_source_url.strip()
+    st.session_state["agent_source_video_bytes"] = b""
+    st.session_state["agent_source_video_title"] = ""
+    st.session_state["agent_video"] = b""
+    st.session_state["agent_verify"] = {}
+
+
 if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
 if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
 if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
 if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
 def agent_ready():
-    if not team_topic.strip():
-        st.error("كتب عنوان الفيديو أو الموضوع أولاً.")
-        return False
     if not team_source_url.strip() and not team_source_videos:
         st.error("دخل رابط الفيديو أو ارفع ملف فيديو.")
         return False
@@ -1198,7 +1204,7 @@ with st.expander("2️⃣ Agent المونتاج"):
     if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=not (team_source_url.strip() or team_source_videos)):
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
-                video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), "", team_language), team_language, team_source_url.strip(), st.session_state.get("agent_source_video_bytes", b""), st.session_state.get("agent_source_video_title", "Linked video"))
+                video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip() or st.session_state.get("agent_source_video_title", "هذا الفيديو"), "", team_language), team_language, team_source_url.strip(), st.session_state.get("agent_source_video_bytes", b""), st.session_state.get("agent_source_video_title", "Linked video"))
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"] = used
             st.session_state["team_edit_note"] = note
@@ -1227,7 +1233,7 @@ if st.button("🎬 صايب الفيديو دابا", type="primary", use_contai
                 st.session_state["agent_source_video_bytes"] = source_bytes
                 st.session_state["agent_source_video_title"] = source_title
             progress.progress(1/3, text="2/3 — Agent 2: المونتاج والصوت...")
-            narration = agent_build_narration_text(team_topic.strip(), "", team_language)
+            narration = agent_build_narration_text(team_topic.strip() or source_title or "هذا الفيديو", "", team_language)
             video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, narration, team_language, team_source_url.strip(), source_bytes, source_title)
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
