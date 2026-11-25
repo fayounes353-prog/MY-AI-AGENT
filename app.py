@@ -1103,24 +1103,22 @@ OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 st.markdown("""
 <style>
 .stApp {max-width: 980px; margin: 0 auto;}
-[data-testid="stChatMessage"] {border-radius: 14px;}
 .hero {padding: 1.2rem 0 .5rem 0;}
 </style>
 """, unsafe_allow_html=True)
 
 if not APP_PASSWORD:
-    st.title("🔒 MY AI AGENT — Private access")
+    st.title("🔒 MY AI AGENT")
     st.error("خاص المسؤول يضيف APP_PASSWORD فـ Secrets ديال الاستضافة.")
     st.stop()
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if not st.session_state.authenticated:
-    st.title("🎬 VIDEO LINK STUDIO")
-    st.caption("استوديو فيديوهات وصفات الطبخ")
+    st.title("🤖 MY AI AGENT — VIDEO TEAM")
     with st.form("login_form"):
-        password = st.text_input("كلمة المرور / Password", type="password")
-        submitted = st.form_submit_button("دخول / Sign in", use_container_width=True)
+        password = st.text_input("كلمة المرور", type="password")
+        submitted = st.form_submit_button("دخول", use_container_width=True)
     if submitted:
         if hmac.compare_digest(password, APP_PASSWORD):
             st.session_state.authenticated = True
@@ -1129,146 +1127,101 @@ if not st.session_state.authenticated:
             st.error("كلمة المرور غير صحيحة.")
     st.stop()
 
-st.markdown('<div class="hero">', unsafe_allow_html=True)
-st.title("🍳 CUISINE VIDEO STUDIO")
-st.caption("دخل رابط الفيديو، اختار المدة واللغة، وخلي الوكلاء يخدمو عليه")
-st.markdown("</div>", unsafe_allow_html=True)
-
 with st.sidebar:
-    st.header("⚙️ الإعدادات")
-    st.caption("MY AI AGENT — Cuisine")
+    st.header("الإعدادات")
+    st.caption("MY AI AGENT — Multi-topic")
     if st.button("تسجيل الخروج", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
 
-st.subheader("🎬 صايب فيديو من رابط")
-st.caption("Agent 1 كيجلب الفيديو من الرابط، Agent 2 كيدير المونتاج والصوت حسب المدة، وAgent 3 كيفحص النتيجة.")
-team_topic = st.text_input("عنوان الفيديو أو الموضوع", placeholder="مثلاً: طريقة تحضير طاجين الدجاج", key="agent_topic")
-team_source_url = st.text_input("رابط الفيديو الأصلي (YouTube / Facebook / Instagram / موقع آخر)", placeholder="https://...", key="agent_source_url")
-team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
-team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
-team_duration = st.select_slider("المدة النهائية", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية", key="agent_duration")
-team_permission = st.checkbox("أؤكد أن عندي الحق في تنزيل هذا الفيديو وتعديله وإعادة استعماله.", key="agent_source_permission")
-team_source_videos = st.file_uploader(
-    "أو ارفع فيديو تملك حق استعماله (اختياري)",
-    type=["mp4", "mov", "m4v", "webm", "mkv", "avi"],
-    accept_multiple_files=True,
-    key="agent_uploads"
-)
+st.title("🤖 MY AI AGENT")
+st.caption("كتب أي موضوع، والفريق يبحث ويكتب السيناريو ويصنع الفيديو ويفحصه.")
+if not GEMINI_API_KEY and not OPENROUTER_API_KEY:
+    st.warning("خاص GEMINI_API_KEY أو OPENROUTER_API_KEY فـ Streamlit Secrets للبحث الذكي وكتابة السيناريو.")
 
-if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
-if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
-if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
-if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
-if "agent_source_video_bytes" not in st.session_state: st.session_state["agent_source_video_bytes"] = b""
-if "agent_source_video_title" not in st.session_state: st.session_state["agent_source_video_title"] = ""
+topic = st.text_input("الموضوع", placeholder="مثلاً: أهداف اللاعبين، طاجين الدجاج، GTA 6، السياحة فالمغرب")
+c1, c2 = st.columns(2)
+with c1:
+    language_label = st.selectbox("لغة الصوت", ["العربية", "Français", "English"])
+with c2:
+    duration = st.select_slider("مدة الفيديو", options=[30,45,60,90,120,180], value=60, format_func=lambda x: str(x)+" ثانية")
+language = {"العربية":"ar", "Français":"fr", "English":"en"}[language_label]
 
-# Clear a previously fetched source whenever the user changes the link.
-if st.session_state.get("agent_last_source_url", "") != team_source_url.strip():
-    st.session_state["agent_last_source_url"] = team_source_url.strip()
-    st.session_state["agent_source_video_bytes"] = b""
-    st.session_state["agent_source_video_title"] = ""
-    st.session_state["agent_video"] = b""
-    st.session_state["agent_verify"] = {}
+st.markdown("#### مصادر الفيديو")
+st.caption("الفريق يبحث على لقطات مرخصة. روابط المنصات ما كتضمنش إمكانية التنزيل أو حق إعادة الاستعمال.")
+source_url = st.text_input("رابط فيديو تملك حق استعماله (اختياري)", placeholder="https://...")
+permission = st.checkbox("كنأكد أن عندي الحق فتنزيل وتعديل وإعادة استعمال هاد الفيديو.")
+uploads = st.file_uploader("أو ارفع فيديوهات تملك حق استعمالها", type=["mp4","mov","m4v","webm","mkv","avi"], accept_multiple_files=True)
 
+for key, default in [("team_research",""),("team_script",""),("team_video",b""),("team_verify",{}),("team_used_sources",[])]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
-if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
-if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
-if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
+def extract_team_narration(script):
+    match = re.search(r"(?is)(?:NARRATION|التعليق الصوتي|النص الصوتي)\s*[:：]?\s*(.*?)(?=\n\s*(?:SOURCES|المصادر|المراجع)\b|$)", script or "")
+    narration = match.group(1).strip() if match else (script or "").strip()
+    narration = re.sub(r"(?im)^\s*(?:TITLE|العنوان)\s*[:：].*$", "", narration)
+    narration = re.sub(r"(?m)^\s*#+\s*", "", narration)
+    narration = re.sub(r"[*_]", "", narration).strip()
+    if len(narration) < 30:
+        raise RuntimeError("السيناريو ما فيهش تعليق صوتي كافي.")
+    return narration
 
-def agent_ready():
-    if not team_source_url.strip() and not team_source_videos:
-        st.error("دخل رابط الفيديو أو ارفع ملف فيديو.")
-        return False
-    if team_source_url.strip() and not team_permission:
-        st.warning("أكد أن عندك الحق في تنزيل الفيديو وتعديله.")
-        return False
-    return True
-
-st.markdown("#### الوكلاء والمهام ديالهم")
-with st.expander("1️⃣ Agent جلب الفيديو من الرابط", expanded=True):
-    st.write("كيجلب الفيديو من الرابط اللي دخلتي وكيحضّرو باش يتسلم لوكيل المونتاج. خاصك تكون مالك الفيديو أو عندك إذن واضح باستعماله.")
-    if st.button("⬇️ جلب الفيديو", key="fetch_source_video"):
-        if not team_source_url.strip():
-            st.error("دخل رابط الفيديو أولاً.")
-        elif not team_permission:
-            st.warning("أكد أن عندك الحق في تنزيل الفيديو وتعديله.")
-        else:
-            try:
-                with st.spinner("Agent 1 كيجلب الفيديو من الرابط..."):
-                    source_bytes, source_title = agent_fetch_video_bytes(team_source_url.strip())
-                st.session_state["agent_source_video_bytes"] = source_bytes
-                st.session_state["agent_source_video_title"] = source_title
-                st.success("تم جلب الفيديو وتسليمه للوكيل الثاني: " + source_title)
-            except Exception as exc:
-                st.session_state["agent_source_video_bytes"] = b""
-                st.error("Agent 1: " + str(exc)[:1200])
-    if st.session_state.get("agent_source_video_bytes"):
-        st.caption("الفيديو الأصلي واجد للمونتاج: " + st.session_state.get("agent_source_video_title", "Source video"))
-
-with st.expander("2️⃣ Agent المونتاج"):
-    st.write("كيمنتج الفيديو الأصلي، كيضبط المدة ويضيف التعليق الصوتي باللغة المختارة.")
-    if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=not (team_source_url.strip() or team_source_videos)):
+if st.button("🚀 شغّل فريق الوكلاء", type="primary", use_container_width=True, disabled=not bool(topic.strip())):
+    if source_url.strip() and not permission:
+        st.error("أكد أن عندك الحق فاستعمال الفيديو الموجود فالرابط.")
+    else:
         try:
-            with st.spinner("كيحوّل ويركب المقاطع..."):
-                video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip() or st.session_state.get("agent_source_video_title", "هذا الفيديو"), "", team_language), team_language, team_source_url.strip(), st.session_state.get("agent_source_video_bytes", b""), st.session_state.get("agent_source_video_title", "Linked video"))
-            st.session_state["agent_video"] = video
-            st.session_state["team_used_clips"] = used
-            st.session_state["team_edit_note"] = note
-            st.success("المونتاج واجد.")
-        except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
-with st.expander("3️⃣ Agent التحقق"):
-    st.write("كيفحص صلاحية MP4، قراءة الإطارات والمدة. الفحص التقني ما كيضمنش حقوق النشر أو الجودة الفنية.")
-    if st.button("شغّل وكيل التحقق", key="run_verify"):
-        if not st.session_state["agent_video"]: st.error("خاص الفيديو النهائي أولاً.")
-        else:
-            try:
-                with st.spinner("كيتحقق من الفيديو..."):
-                    st.session_state["agent_verify"] = agent_verify_output(st.session_state["agent_video"], "", team_duration, "")
-                st.success("التحقق سالا.")
-                st.write(st.session_state["agent_verify"])
-            except Exception as exc: st.error("وكيل التحقق: " + str(exc)[:1500])
-
-if st.button("🎬 صايب الفيديو دابا", type="primary", use_container_width=True, key="run_all_agents"):
-    if agent_ready():
-        try:
-            progress = st.progress(0, text="1/3 — Agent 1: جلب الفيديو...")
-            source_bytes = st.session_state.get("agent_source_video_bytes", b"")
-            source_title = st.session_state.get("agent_source_video_title", "Linked video")
-            if team_source_url.strip() and not source_bytes:
-                source_bytes, source_title = agent_fetch_video_bytes(team_source_url.strip())
-                st.session_state["agent_source_video_bytes"] = source_bytes
-                st.session_state["agent_source_video_title"] = source_title
-            progress.progress(1/3, text="2/3 — Agent 2: المونتاج والصوت...")
-            narration = agent_build_narration_text(team_topic.strip() or source_title or "هذا الفيديو", "", team_language)
-            video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, narration, team_language, team_source_url.strip(), source_bytes, source_title)
-            st.session_state["agent_video"] = video
-            st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
-            progress.progress(2/3, text="3/3 — التحقق من الفيديو النهائي...")
-            verification = agent_verify_output(video, "", team_duration, "")
-            st.session_state["agent_verify"] = verification
+            progress = st.progress(0, text="1/4 — البحث على الموضوع...")
+            research = search_anything_on_web(topic.strip(), GEMINI_API_KEY, OPENROUTER_API_KEY)
+            st.session_state["team_research"] = research
+            progress.progress(1/4, text="2/4 — كتابة السيناريو...")
+            script = agent_write_script(topic.strip(), research, language, duration, GEMINI_API_KEY, OPENROUTER_API_KEY)
+            narration = extract_team_narration(script)
+            st.session_state["team_script"] = script
+            progress.progress(2/4, text="3/4 — البحث عن فيديوهات مرخصة والمونتاج...")
+            clips, seen = [], set()
+            for search_fn in (search_internet_archive_videos, search_reusable_video_clips):
+                try:
+                    for item in search_fn(topic.strip(), limit=8):
+                        key = item.get("url") or item.get("page") or item.get("title")
+                        if key and key not in seen:
+                            seen.add(key)
+                            clips.append(item)
+                except Exception:
+                    pass
+            if not clips and not uploads and not source_url.strip():
+                raise RuntimeError("لقينا البحث والسيناريو، ولكن ما لقيناش لقطات فيديو مرخصة لهاد الموضوع. ارفع فيديو عندك الحق تستعمله أو جرّب موضوعاً آخر. ما غاديش نعوضو الفيديو بصور.")
+            video, used, note = agent_edit_video(topic.strip(), clips, duration, uploads, narration, language, source_url.strip() if permission else "")
+            st.session_state["team_video"] = video
+            st.session_state["team_used_sources"] = used
+            progress.progress(3/4, text="4/4 — التحقق من ملف الفيديو...")
+            verification = agent_verify_output(video, script, duration, GEMINI_API_KEY)
+            st.session_state["team_verify"] = verification
             progress.progress(1.0, text="اكتمل الفريق.")
-            st.success("الفيديو تْصاوب وتْفحص. تفرّج فيه وراجع دقة المعلومات وحقوق استعمال كل لقطة قبل النشر.")
+            st.success("الفيديو تصاوب وتفحص تقنياً. راجع المحتوى وحقوق اللقطات قبل النشر.")
         except Exception as exc:
-            st.error("توقف الفريق: " + str(exc)[:1800])
+            st.error("الفريق ما كملش المهمة: " + str(exc)[:1800])
 
-if st.session_state["agent_verify"]:
-    st.markdown("**نتيجة التحقق:**")
-    st.write(st.session_state["agent_verify"])
-
-# Keep the finished video visible outside the collapsed editor expander.
-if st.session_state.get("agent_video"):
+if st.session_state.get("team_research"):
+    with st.expander("نتائج البحث", expanded=False):
+        st.markdown(st.session_state["team_research"])
+if st.session_state.get("team_script"):
+    with st.expander("السيناريو والتعليق الصوتي", expanded=False):
+        st.markdown(st.session_state["team_script"])
+if st.session_state.get("team_verify"):
+    st.markdown("#### نتيجة التحقق")
+    st.write(st.session_state["team_verify"])
+if st.session_state.get("team_video"):
     st.divider()
     st.subheader("🎬 الفيديو النهائي")
-    st.caption("الفيديو اللي تْصاوب وتْفحص — تقدر تشوفو هنا أو تحمّلو.")
-    st.video(st.session_state["agent_video"])
-    st.download_button(
-        "⬇️ حمّل الفيديو MP4",
-        data=st.session_state["agent_video"],
-        file_name="Cuisine_recipe_video.mp4",
-        mime="video/mp4",
-        key="download_final_team_video",
-        use_container_width=True,
-    )
-
+    st.video(st.session_state["team_video"])
+    st.download_button("حمّل الفيديو MP4", data=st.session_state["team_video"], file_name="MY_AI_AGENT_video.mp4", mime="video/mp4", use_container_width=True)
+if st.session_state.get("team_used_sources"):
+    with st.expander("مصادر اللقطات وحقوق الاستعمال", expanded=True):
+        for item in st.session_state["team_used_sources"]:
+            st.markdown("- **"+str(item.get("title","Video"))+"** — "+str(item.get("license","راجع المصدر"))+" — "+str(item.get("artist","غير محدد")))
+            if item.get("page"):
+                st.markdown("  "+str(item["page"]))
+st.divider()
+st.caption("البحث في المنصات كيعرض المحتوى العام المتاح للفهرسة؛ ماشي كل منصة كتسمح بالتنزيل. راجع دائماً شروط الترخيص.")
