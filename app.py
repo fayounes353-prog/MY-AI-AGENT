@@ -915,10 +915,41 @@ def agent_build_narration_text(topic, research, language):
     return (intro + fallback).strip()
 
 
-def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar"):
+def agent_download_link_video(url, temp_dir):
+    """Download a public video URL supplied by the user, when supported by yt-dlp."""
+    if not url or not re.match(r"^https?://", url.strip(), re.I):
+        raise RuntimeError("دخل رابط فيديو صحيح يبدأ بـ http أو https.")
+    try:
+        import yt_dlp
+    except ImportError:
+        raise RuntimeError("مكتبة تنزيل الفيديو ما زالت كتثبت. عاود المحاولة بعد إعادة تشغيل التطبيق.")
+    template=os.path.join(temp_dir,"linked_source.%(ext)s")
+    options={"outtmpl":template,"format":"best[ext=mp4]/best","merge_output_format":"mp4",
+             "noplaylist":True,"max_filesize":250*1024*1024,"socket_timeout":25,
+             "retries":2,"quiet":True,"no_warnings":True}
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info=ydl.extract_info(url.strip(),download=True)
+            downloaded=ydl.prepare_filename(info)
+        candidates=[downloaded,os.path.splitext(downloaded)[0]+".mp4"]
+        path=next((p for p in candidates if os.path.isfile(p) and os.path.getsize(p)>10000),None)
+        if not path: raise RuntimeError("المصدر ما عطاش ملف فيديو صالح.")
+        if os.path.getsize(path)>250*1024*1024: raise RuntimeError("حجم الفيديو تجاوز 250 MB.")
+        return {"path":path,"title":str(info.get("title") or "Linked video"),
+                "license":"User supplied link — permission not verified",
+                "artist":str(info.get("uploader") or "غير محدد"),
+                "page":str(info.get("webpage_url") or url)}
+    except Exception as exc:
+        raise RuntimeError("ما قدرناش نجلبو الفيديو من الرابط. المنصة قد تمنع التنزيل أو الرابط غير مدعوم. "
+                           "جرّب رابطاً مباشراً أو ارفع الملف. التفاصيل: "+str(exc)[:450])
+
+
+def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar", source_url=""):
     """Editor agent: assemble topic-relevant reusable footage into a vertical MP4 with spoken narration."""
     with tempfile.TemporaryDirectory() as temp_dir:
         usable = agent_download_cc_videos(clips, temp_dir)
+        if source_url.strip():
+            usable.append(agent_download_link_video(source_url, temp_dir))
         for upload_index, uploaded in enumerate(uploaded_sources or []):
             try:
                 safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded.name)
@@ -1061,7 +1092,7 @@ if not APP_PASSWORD:
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if not st.session_state.authenticated:
-    st.title("🍳 CUISINE VIDEO STUDIO")
+    st.title("🎬 VIDEO LINK STUDIO")
     st.caption("استوديو فيديوهات وصفات الطبخ")
     with st.form("login_form"):
         password = st.text_input("كلمة المرور / Password", type="password")
@@ -1076,7 +1107,7 @@ if not st.session_state.authenticated:
 
 st.markdown('<div class="hero">', unsafe_allow_html=True)
 st.title("🍳 CUISINE VIDEO STUDIO")
-st.caption("استوديو متخصص في إعداد فيديوهات وصفات الطبخ")
+st.caption("دخل رابط الفيديو، اختار المدة واللغة، وخلي الوكلاء يخدمو عليه")
 st.markdown("</div>", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -1086,14 +1117,16 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
-st.subheader("🍳 صايب فيديو وصفة طبخ")
-st.caption("استوديو متخصص في وصفات الطبخ: يبحث عن المقادير وطريقة التحضير، ثم يحاول إيجاد لقطات طبخ حقيقية مرتبطة بالوصفة ويضيف تعليقاً صوتياً. إذا لم يجد لقطات مناسبة، يوقف المونتاج بدل استعمال فيديو عشوائي.")
-team_topic = st.text_input("اسم الوصفة", placeholder="مثلاً: طاجين الدجاج بالزيتون، الحريرة، البسطيلة، Pancakes...", key="agent_topic")
+st.subheader("🎬 صايب فيديو من رابط")
+st.caption("Agent 1 كيجلب الفيديو من الرابط، Agent 2 كيدير المونتاج والصوت حسب المدة، وAgent 3 كيفحص النتيجة.")
+team_topic = st.text_input("عنوان الفيديو أو الموضوع", placeholder="مثلاً: طريقة تحضير طاجين الدجاج", key="agent_topic")
+team_source_url = st.text_input("رابط الفيديو الأصلي (YouTube / Facebook / Instagram / موقع آخر)", placeholder="https://...", key="agent_source_url")
 team_language_label = st.selectbox("لغة التعليق الصوتي", ["العربية", "Français", "English"], index=0, key="team_language")
 team_language = {"العربية": "ar", "Français": "fr", "English": "en"}[team_language_label]
-team_duration = st.select_slider("مدة الفيديو", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية", key="agent_duration")
+team_duration = st.select_slider("المدة النهائية", options=[30, 45, 60, 90, 120, 180], value=60, format_func=lambda x: f"{x} ثانية", key="agent_duration")
+team_permission = st.checkbox("أؤكد أن عندي الحق في تنزيل هذا الفيديو وتعديله وإعادة استعماله.", key="agent_source_permission")
 team_source_videos = st.file_uploader(
-    "فيديوهات تملك حق استعمالها (اختياري)",
+    "أو ارفع فيديو تملك حق استعماله (اختياري)",
     type=["mp4", "mov", "m4v", "webm", "mkv", "avi"],
     accept_multiple_files=True,
     key="agent_uploads"
@@ -1104,84 +1137,21 @@ if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
 if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
 if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
-if "agent_recipe_image" not in st.session_state: st.session_state["agent_recipe_image"] = None
-if "agent_recipe_image_topic" not in st.session_state: st.session_state["agent_recipe_image_topic"] = ""
-if "agent_recipe_image_error" not in st.session_state: st.session_state["agent_recipe_image_error"] = ""
-if "agent_confirmed_topic" not in st.session_state: st.session_state["agent_confirmed_topic"] = ""
-
-# Changing the recipe invalidates the previous photo approval and all recipe-specific results.
-if st.session_state.get("agent_last_topic", "") != team_topic.strip():
-    st.session_state["agent_last_topic"] = team_topic.strip()
-    st.session_state["agent_recipe_image"] = None
-    st.session_state["agent_recipe_image_topic"] = ""
-    st.session_state["agent_recipe_image_error"] = ""
-    st.session_state["agent_confirmed_topic"] = ""
-    st.session_state["agent_research"] = ""
-    st.session_state["agent_clips"] = []
-    st.session_state["agent_video"] = b""
-    st.session_state["agent_verify"] = {}
-
-st.markdown("#### 🖼️ تأكيد الطبق قبل بدء الخدمة")
-st.caption("كتب اسم الوصفة، ومنين تأكد الإدخال غادي تظهر صورة الطبق هنا تلقائياً باش تأكدها قبل ما يبداو الوكلاء.")
-
-# Automatically fetch once per distinct recipe; no separate photo-search button is needed.
-current_topic = team_topic.strip()
-if current_topic and st.session_state.get("agent_recipe_image_topic") != current_topic:
-    st.session_state["agent_recipe_image"] = None
-    st.session_state["agent_confirmed_topic"] = ""
-    st.session_state["agent_recipe_image_error"] = ""
-    with st.spinner("كنقلب على صورة مطابقة للطبق..."):
-        try:
-            found_image = agent_find_recipe_image(current_topic)
-            st.session_state["agent_recipe_image"] = found_image
-            st.session_state["agent_recipe_image_topic"] = current_topic
-            if not found_image:
-                st.session_state["agent_recipe_image_error"] = "ما لقيناش صورة مطابقة بثقة لهاد الاسم. جرّب اسم آخر أو زيد وصفاً أدق."
-        except Exception as exc:
-            st.session_state["agent_recipe_image"] = None
-            st.session_state["agent_recipe_image_topic"] = current_topic
-            st.session_state["agent_recipe_image_error"] = "تعذر البحث عن الصورة: " + str(exc)[:350]
-
-recipe_image = st.session_state.get("agent_recipe_image")
-if current_topic and recipe_image and st.session_state.get("agent_recipe_image_topic") == current_topic:
-    st.image(recipe_image["bytes"], caption=recipe_image["title"], use_container_width=True)
-    st.caption("المصدر: " + recipe_image.get("license", "راجع صفحة المصدر") +
-               " — " + recipe_image.get("artist", "غير محدد"))
-    if recipe_image.get("page"):
-        st.markdown("[فتح صفحة الصورة الأصلية](" + recipe_image["page"] + ")")
-    if st.session_state.get("agent_confirmed_topic") == current_topic:
-        st.success("تأكد الطبق. دابا يقدر الفريق يخدم على نفس الوصفة.")
-    else:
-        col_yes, col_retry = st.columns(2)
-        with col_yes:
-            if st.button("✅ نعم، هادي هي — كمل", type="primary", key="confirm_recipe_photo"):
-                st.session_state["agent_confirmed_topic"] = current_topic
-                st.rerun()
-        with col_retry:
-            if st.button("🔄 لا، قلب على صورة أخرى", key="retry_recipe_photo"):
-                st.session_state["agent_recipe_image_topic"] = ""
-                st.session_state["agent_recipe_image"] = None
-                st.session_state["agent_confirmed_topic"] = ""
-                st.rerun()
-elif current_topic and st.session_state.get("agent_recipe_image_error"):
-    st.warning(st.session_state["agent_recipe_image_error"])
-    if st.button("🔄 عاود البحث على الصورة", key="retry_recipe_photo_empty"):
-        st.session_state["agent_recipe_image_topic"] = ""
-        st.session_state["agent_recipe_image_error"] = ""
-        st.rerun()
-elif not current_topic:
-    st.info("كتب اسم الوصفة باش تظهر صورة الطبق هنا.")
-
-
+if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
+if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
+if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
+if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
 def agent_ready():
     if not team_topic.strip():
-        st.error("كتب اسم الوصفة أولاً.")
+        st.error("كتب عنوان الفيديو أو الموضوع أولاً.")
         return False
-    if st.session_state.get("agent_confirmed_topic") != team_topic.strip():
-        st.warning("أولاً عرض صورة الطبق واضغط: نعم، هادي هي — كمل.")
+    if not team_source_url.strip() and not team_source_videos:
+        st.error("دخل رابط الفيديو أو ارفع ملف فيديو.")
         return False
-    # Public RSS research plus licensed-footage search and gTTS can run without paid AI API keys.
+    if team_source_url.strip() and not team_permission:
+        st.warning("أكد أن عندك الحق في تنزيل الفيديو وتعديله.")
+        return False
     return True
 
 st.markdown("#### الوكلاء والمهام ديالهم")
@@ -1201,7 +1171,7 @@ with st.expander("1️⃣ وكيل البحث — الوصفة والمقادي�
         st.text_area("نتيجة البحث المحفوظة", st.session_state["agent_research"], height=160, key="research_preview")
 
 with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
-    st.write("كيبحث على لقطات حقيقية لتحضير نفس الوصفة أو مكوناتها وتقنيات الطهي من مكتبات تسمح بإعادة الاستعمال. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
+    st.write("كيعالج رابط الفيديو اللي دخلتيه إذا كانت المنصة كتسمح بالوصول. خاص يكون عندك إذن التنزيل والتعديل.")
     if st.button("شغّل وكيل الفيديوهات", key="run_clips"):
         if not agent_ready():
             pass
@@ -1215,18 +1185,18 @@ with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
         st.markdown(f"- **{clip.get('title','Video')}** — {clip.get('license','license unknown')} — [المصدر]({clip.get('page')})" if clip.get("page") else f"- {clip.get('title','Video')} — {clip.get('license','license unknown')}")
 
 with st.expander("3️⃣ وكيل المونتاج"):
-    st.write("كيمنتج اللقطات الحقيقية اللي لقاها أو الفيديوهات اللي رفعتَها، ويضيف تعليقاً صوتياً آلياً. ما كيعوّضش الفيديو بصور ثابتة إذا ما لقا حتى لقطة مناسبة.")
-    if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=st.session_state.get("agent_confirmed_topic") != team_topic.strip()):
+    st.write("كيمنتج الفيديو الأصلي، كيضبط المدة ويضيف التعليق الصوتي باللغة المختارة.")
+    if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=not (team_source_url.strip() or team_source_videos)):
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
-                video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), st.session_state["agent_research"], team_language), team_language)
+                video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), st.session_state["agent_research"], team_language), team_language, team_source_url.strip())
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"] = used
             st.session_state["team_edit_note"] = note
             st.success("المونتاج واجد.")
         except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
 with st.expander("4️⃣ وكيل التحقق"):
-    st.write("كيختبر ملف MP4 ومدته؛ بلا مراجعة سيناريو لأن مرحلة السيناريو محذوفة.")
+    st.write("كيفحص صلاحية MP4، قراءة الإطارات والمدة. الفحص التقني ما كيضمنش حقوق النشر أو الجودة الفنية.")
     if st.button("شغّل وكيل التحقق", key="run_verify"):
         if not st.session_state["agent_video"]: st.error("خاص الفيديو النهائي أولاً.")
         else:
@@ -1247,7 +1217,7 @@ if st.button("🎬 صايب الفيديو دابا", type="primary", use_contai
             clips = agent_find_video_sources(team_topic.strip(), limit=12)
             st.session_state["agent_clips"] = clips
             progress.progress(2/4, text="3/4 — المونتاج...")
-            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), research, team_language), team_language)
+            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), research, team_language), team_language, team_source_url.strip())
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
             progress.progress(3/4, text="4/4 — التحقق...")
