@@ -924,10 +924,14 @@ def agent_download_link_video(url, temp_dir):
     except ImportError:
         raise RuntimeError("مكتبة تنزيل الفيديو ما زالت كتثبت. عاود المحاولة بعد إعادة تشغيل التطبيق.")
     template=os.path.join(temp_dir,"linked_source.%(ext)s")
-    options={"outtmpl":template,"format":"bestvideo*+bestaudio/best","merge_output_format":"mp4",
+    # Prefer the highest available video quality with audio; fall back to a
+    # single-file format when the platform does not provide separate streams.
+    options={"outtmpl":template,"format":"bestvideo*+bestaudio/best",
+             "merge_output_format":"mp4",
              "ffmpeg_location":imageio_ffmpeg.get_ffmpeg_exe(),
-             "noplaylist":True,"max_filesize":250*1024*1024,"socket_timeout":25,
-             "retries":2,"quiet":True,"no_warnings":True}
+             "noplaylist":True,"socket_timeout":60,
+             "retries":5,"fragment_retries":5,"extractor_retries":3,
+             "file_access_retries":3,"quiet":True,"no_warnings":True}
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
             info=ydl.extract_info(url.strip(),download=True)
@@ -935,7 +939,11 @@ def agent_download_link_video(url, temp_dir):
         candidates=[downloaded,os.path.splitext(downloaded)[0]+".mp4"]
         path=next((p for p in candidates if os.path.isfile(p) and os.path.getsize(p)>10000),None)
         if not path: raise RuntimeError("المصدر ما عطاش ملف فيديو صالح.")
-        if os.path.getsize(path)>250*1024*1024: raise RuntimeError("حجم الفيديو تجاوز 250 MB.")
+        # Keep a practical memory ceiling because the next agent receives the
+        # downloaded video as bytes; do not restrict quality before download.
+        max_bytes=500*1024*1024
+        if os.path.getsize(path)>max_bytes:
+            raise RuntimeError("الفيديو بجودته الأصلية كبير بزاف (أكثر من 500 MB). اختار فيديو أقصر أو حمّلو بجودة أقل.")
         return {"path":path,"title":str(info.get("title") or "Linked video"),
                 "license":"User supplied link — permission not verified",
                 "artist":str(info.get("uploader") or "غير محدد"),
