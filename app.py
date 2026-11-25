@@ -591,29 +591,51 @@ def build_vertical_video(title, script, language="ar"):
             return video_file.read()
 
 
+def agent_recipe_search_queries(topic):
+    """Expand a recipe name into precise multilingual dish names, never generic cooking terms."""
+    raw = (topic or "").strip()
+    normalized = re.sub(r"\\s+", " ", raw.lower())
+    aliases = {
+        "tajine poulet": ["tajine poulet", "tajine de poulet", "chicken tagine", "Moroccan chicken tagine", "طاجين الدجاج"],
+        "tajine de poulet": ["tajine de poulet", "tajine poulet", "chicken tagine", "Moroccan chicken tagine", "طاجين الدجاج"],
+        "chicken tagine": ["chicken tagine", "Moroccan chicken tagine", "tajine de poulet", "طاجين الدجاج"],
+        "طاجين الدجاج": ["طاجين الدجاج", "tajine poulet", "tajine de poulet", "chicken tagine"],
+        "tajine kefta": ["tajine kefta", "kefta tagine", "Moroccan meatball tagine", "طاجين الكفتة"],
+        "tajine viande": ["tajine viande", "beef tagine", "lamb tagine", "tajine de viande", "طاجين اللحم"],
+        "couscous": ["Moroccan couscous", "couscous preparation", "كسكس مغربي"],
+        "harira": ["Moroccan harira soup", "harira recipe", "الحريرة المغربية"],
+        "pastilla": ["Moroccan chicken pastilla", "pastilla poulet", "بسطيلة الدجاج"],
+        "rfissa": ["Moroccan rfissa", "rfissa chicken", "الرفيسة المغربية"],
+    }
+    for key, variants in aliases.items():
+        if key in normalized:
+            return list(dict.fromkeys([raw] + variants))[:6]
+    return [raw]
+
 def agent_find_video_sources(topic, limit=12):
-    """Find actual downloadable reusable video files; try Archive first, then Wikimedia Commons."""
+    """Search exact recipe names in several languages; never add generic words like 'cooking'."""
     collected, seen, errors = [], set(), []
-    # Internet Archive returns direct media file URLs, not just social/search result pages.
-    # Search using the user's topic itself; do not broaden it into unrelated generic footage.
-    for query in [topic]:
+    queries = agent_recipe_search_queries(topic)
+    # Search each exact dish name separately so one weak keyword cannot dominate results.
+    for query in queries:
         try:
-            for item in search_internet_archive_videos(query, limit=limit):
+            for item in search_internet_archive_videos(query, limit=max(2, min(limit, 5))):
                 key = item.get("url") or item.get("page") or item.get("title")
                 if key and key not in seen:
                     seen.add(key)
+                    item["matched_query"] = query
                     collected.append(item)
                 if len(collected) >= limit:
                     return collected
         except Exception as exc:
             errors.append("Internet Archive: " + str(exc)[:180])
-    # Wikimedia Commons is a second source; the downloader independently checks its license.
-    for query in [topic + " filetype:video"]:
+    for query in queries:
         try:
-            for item in search_reusable_video_clips(query, limit=limit):
+            for item in search_reusable_video_clips(query + " filetype:video", limit=max(2, min(limit, 5))):
                 key = item.get("url") or item.get("page") or item.get("title")
                 if key and key not in seen:
                     seen.add(key)
+                    item["matched_query"] = query
                     collected.append(item)
                 if len(collected) >= limit:
                     return collected
@@ -622,7 +644,7 @@ def agent_find_video_sources(topic, limit=12):
     if collected:
         return collected
     if errors:
-        raise RuntimeError("ما تلقينا حتى ملف فيديو مرخص. تفاصيل البحث: " + " | ".join(errors[:4]))
+        raise RuntimeError("ما تلقينا حتى فيديو مرخص مطابق للوصفة. تفاصيل البحث: " + " | ".join(errors[:4]))
     return []
 
 
@@ -1041,7 +1063,7 @@ with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
         else:
             try:
                 with st.spinner("كيقلب على فيديوهات قابلة للاستعمال..."):
-                    st.session_state["agent_clips"] = agent_find_video_sources(team_topic.strip() + " cooking preparation ingredients", limit=12)
+                    st.session_state["agent_clips"] = agent_find_video_sources(team_topic.strip(), limit=12)
                 st.success(f"لقى {len(st.session_state['agent_clips'])} فيديو مرشح.")
             except Exception as exc: st.error("وكيل الفيديوهات: " + str(exc)[:1200])
     for clip in st.session_state["agent_clips"][:12]:
@@ -1077,7 +1099,7 @@ if st.button("🎬 صايب الفيديو دابا", type="primary", use_contai
             research = search_anything_on_web("وصفة " + team_topic.strip() + " المقادير الكميات طريقة التحضير وقت الطهي", GEMINI_API_KEY, OPENROUTER_API_KEY)
             st.session_state["agent_research"] = research
             progress.progress(1/4, text="2/4 — البحث عن الفيديوهات...")
-            clips = agent_find_video_sources(team_topic.strip() + " cooking preparation ingredients", limit=12)
+            clips = agent_find_video_sources(team_topic.strip(), limit=12)
             st.session_state["agent_clips"] = clips
             progress.progress(2/4, text="3/4 — المونتاج...")
             video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), research, team_language), team_language)
