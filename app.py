@@ -612,6 +612,67 @@ def agent_recipe_search_queries(topic):
             return list(dict.fromkeys([raw] + variants))[:6]
     return [raw]
 
+
+def agent_find_recipe_image(topic):
+    """Find a representative Wikimedia Commons dish photo for user confirmation."""
+    variants = agent_recipe_search_queries(topic)
+    headers = {"User-Agent": "MYAIAgentCuisineStudio/1.0 (recipe image preview)"}
+    stop_words = {"the", "and", "for", "with", "from", "moroccan", "recipe", "dish", "traditional"}
+    topic_terms = {
+        t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", " ".join(variants[:3]))
+        if len(t) > 2 and t.lower() not in stop_words
+    }
+    for query in variants:
+        params = urllib.parse.urlencode({
+            "action": "query", "generator": "search",
+            "gsrsearch": query + " dish food", "gsrnamespace": 6,
+            "gsrlimit": 10, "prop": "imageinfo",
+            "iiprop": "url|extmetadata", "iiurlwidth": 1000, "format": "json"
+        })
+        request = urllib.request.Request(
+            "https://commons.wikimedia.org/w/api.php?" + params, headers=headers
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            continue
+        pages = list(payload.get("query", {}).get("pages", {}).values())
+        for page in pages:
+            title = str(page.get("title", ""))
+            title_terms = {t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", title)}
+            if topic_terms and not (topic_terms & title_terms):
+                continue
+            info = (page.get("imageinfo") or [{}])[0]
+            image_url = info.get("thumburl") or info.get("url")
+            if not image_url:
+                continue
+            ext = os.path.splitext(urllib.parse.urlparse(image_url).path)[1].lower()
+            if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                continue
+            try:
+                image_request = urllib.request.Request(image_url, headers=headers)
+                with urllib.request.urlopen(image_request, timeout=20) as image_response:
+                    image_bytes = image_response.read(8 * 1024 * 1024 + 1)
+                if len(image_bytes) > 8 * 1024 * 1024:
+                    continue
+                image = Image.open(io.BytesIO(image_bytes))
+                image.verify()
+                metadata = info.get("extmetadata") or {}
+                def meta_value(key):
+                    raw = metadata.get(key, {}).get("value", "")
+                    return re.sub(r"<[^>]+>", "", str(raw)).strip()
+                return {
+                    "bytes": image_bytes,
+                    "title": title,
+                    "page": info.get("descriptionurl", ""),
+                    "license": meta_value("LicenseShortName") or meta_value("UsageTerms") or "راجع صفحة المصدر",
+                    "artist": meta_value("Artist") or "غير محدد"
+                }
+            except Exception:
+                continue
+    return None
+
 def agent_find_video_sources(topic, limit=12):
     """Search exact recipe names in several languages; never add generic words like 'cooking'."""
     collected, seen, errors = [], set(), []
@@ -1033,9 +1094,61 @@ if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
 if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
 if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
+if "agent_recipe_image" not in st.session_state: st.session_state["agent_recipe_image"] = None
+if "agent_confirmed_topic" not in st.session_state: st.session_state["agent_confirmed_topic"] = ""
+
+# Changing the recipe invalidates the previous photo approval and all recipe-specific results.
+if st.session_state.get("agent_last_topic", "") != team_topic.strip():
+    st.session_state["agent_last_topic"] = team_topic.strip()
+    st.session_state["agent_recipe_image"] = None
+    st.session_state["agent_confirmed_topic"] = ""
+    st.session_state["agent_research"] = ""
+    st.session_state["agent_clips"] = []
+    st.session_state["agent_video"] = b""
+    st.session_state["agent_verify"] = {}
+
+st.markdown("#### 🖼️ تأكيد الطبق قبل بدء الخدمة")
+st.caption("كتب اسم الوصفة، وغادي نقلبو على صورة ممثلة للطبق باش تأكد لينا واش هو اللي قصدتي.")
+if st.button("🔎 ورّيني صورة الطبق", key="find_recipe_photo", disabled=not bool(team_topic.strip())):
+    with st.spinner("كنقلب على صورة للطبق..."):
+        try:
+            st.session_state["agent_recipe_image"] = agent_find_recipe_image(team_topic.strip())
+            st.session_state["agent_confirmed_topic"] = ""
+        except Exception as exc:
+            st.session_state["agent_recipe_image"] = None
+            st.error("تعذر البحث عن الصورة: " + str(exc)[:500])
+
+recipe_image = st.session_state.get("agent_recipe_image")
+if recipe_image:
+    st.image(recipe_image["bytes"], caption=recipe_image["title"], use_container_width=True)
+    st.caption("المصدر: " + recipe_image.get("license", "راجع صفحة المصدر") +
+               " — " + recipe_image.get("artist", "غير محدد"))
+    if recipe_image.get("page"):
+        st.markdown("[فتح صفحة الصورة الأصلية](" + recipe_image["page"] + ")")
+    if st.session_state.get("agent_confirmed_topic") == team_topic.strip():
+        st.success("تأكد الطبق. دابا يقدر الفريق يخدم على نفس الوصفة.")
+    else:
+        col_yes, col_retry = st.columns(2)
+        with col_yes:
+            if st.button("✅ نعم، هادي هي — كمل", type="primary", key="confirm_recipe_photo"):
+                st.session_state["agent_confirmed_topic"] = team_topic.strip()
+                st.rerun()
+        with col_retry:
+            if st.button("🔄 لا، قلب على صورة أخرى", key="retry_recipe_photo"):
+                st.session_state["agent_recipe_image"] = None
+                st.session_state["agent_confirmed_topic"] = ""
+                st.rerun()
+else:
+    st.info("خاصك تعرض صورة الطبق وتأكد منها قبل تشغيل الوكلاء.")
+
+
+
 def agent_ready():
     if not team_topic.strip():
         st.error("كتب اسم الوصفة أولاً.")
+        return False
+    if st.session_state.get("agent_confirmed_topic") != team_topic.strip():
+        st.warning("أولاً عرض صورة الطبق واضغط: نعم، هادي هي — كمل.")
         return False
     # Public RSS research plus licensed-footage search and gTTS can run without paid AI API keys.
     return True
@@ -1059,7 +1172,8 @@ with st.expander("1️⃣ وكيل البحث — الوصفة والمقادي�
 with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
     st.write("كيبحث على لقطات حقيقية لتحضير نفس الوصفة أو مكوناتها وتقنيات الطهي من مكتبات تسمح بإعادة الاستعمال. روابط YouTube وTikTok وInstagram ما كتساويش إذن تنزيل أو إعادة نشر.")
     if st.button("شغّل وكيل الفيديوهات", key="run_clips"):
-        if not team_topic.strip(): st.error("كتب اسم الوصفة أولاً.")
+        if not agent_ready():
+            pass
         else:
             try:
                 with st.spinner("كيقلب على فيديوهات قابلة للاستعمال..."):
@@ -1072,6 +1186,8 @@ with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
 with st.expander("3️⃣ وكيل المونتاج"):
     st.write("كيمنتج اللقطات الحقيقية اللي لقاها أو الفيديوهات اللي رفعتَها، ويضيف تعليقاً صوتياً آلياً. ما كيعوّضش الفيديو بصور ثابتة إذا ما لقا حتى لقطة مناسبة.")
     if st.button("شغّل وكيل المونتاج", key="run_editor"):
+        if not agent_ready():
+            st.stop()
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
                 video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), st.session_state["agent_research"], team_language), team_language)
@@ -1093,7 +1209,7 @@ with st.expander("4️⃣ وكيل التحقق"):
             except Exception as exc: st.error("وكيل التحقق: " + str(exc)[:1500])
 
 if st.button("🎬 صايب الفيديو دابا", type="primary", use_container_width=True, key="run_all_agents"):
-    if team_topic.strip():
+    if agent_ready():
         try:
             progress = st.progress(0, text="1/4 — البحث...")
             research = search_anything_on_web("وصفة " + team_topic.strip() + " المقادير الكميات طريقة التحضير وقت الطهي", GEMINI_API_KEY, OPENROUTER_API_KEY)
