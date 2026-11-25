@@ -870,7 +870,7 @@ def agent_write_script(topic, research, language, target_seconds, gemini_api_key
             "Thanks for watching."
         )
         sources = "Generic local fallback script created because hosted AI services were unavailable; verify specific details before publishing."
-    return "TITLE: " + title + "\\nNARRATION: " + narration + "\\nSOURCES: " + sources
+    return "TITLE: " + title + "\nNARRATION: " + narration + "\nSOURCES: " + sources
 
 
 def agent_create_voiceover_bytes(script, language):
