@@ -977,9 +977,9 @@ def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narrat
         conversion_errors = []
         for idx, clip in enumerate(usable):
             segment = os.path.join(temp_dir, "segment_" + str(idx) + ".mp4")
-            cmd = [ffmpeg, "-y", "-i", clip["path"], "-t", str(per_clip),
+            cmd = [ffmpeg, "-y", "-stream_loop", "-1", "-i", clip["path"], "-t", str(per_clip),
                    "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p",
-                   "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-r", "30",
+                   "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "21", "-r", "30",
                    "-movflags", "+faststart", segment]
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
@@ -1000,7 +1000,7 @@ def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narrat
         output = os.path.join(temp_dir, "final.mp4")
         joined = subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listing,
                                  "-t", str(int(target_seconds)),
-                                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                                 "-c:v", "libx264", "-preset", "medium", "-crf", "21",
                                  "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", output],
                                 capture_output=True, text=True, timeout=300)
         if joined.returncode != 0 or not os.path.exists(output) or os.path.getsize(output) < 10000:
@@ -1210,20 +1210,20 @@ with st.expander("4️⃣ وكيل التحقق"):
 if st.button("🎬 صايب الفيديو دابا", type="primary", use_container_width=True, key="run_all_agents"):
     if agent_ready():
         try:
-            progress = st.progress(0, text="1/4 — البحث...")
-            research = search_anything_on_web("وصفة " + team_topic.strip() + " المقادير الكميات طريقة التحضير وقت الطهي", GEMINI_API_KEY, OPENROUTER_API_KEY)
+            progress = st.progress(0, text="1/3 — جلب الفيديو من الرابط...")
+            research = "المصدر الأساسي هو الفيديو الذي أدخل المستخدم رابطه. لا تُضاف لقطات أخرى من البحث."
             st.session_state["agent_research"] = research
-            progress.progress(1/4, text="2/4 — البحث عن الفيديوهات...")
-            clips = agent_find_video_sources(team_topic.strip(), limit=12)
+            clips = []
             st.session_state["agent_clips"] = clips
-            progress.progress(2/4, text="3/4 — المونتاج...")
-            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), research, team_language), team_language, team_source_url.strip())
+            progress.progress(1/3, text="2/3 — المونتاج والصوت...")
+            narration = agent_build_narration_text(team_topic.strip(), "", team_language)
+            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, narration, team_language, team_source_url.strip())
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
-            progress.progress(3/4, text="4/4 — التحقق...")
+            progress.progress(2/3, text="3/3 — التحقق من الفيديو النهائي...")
             verification = agent_verify_output(video, "", team_duration, "")
             st.session_state["agent_verify"] = verification
-            progress.progress(1.0, text="4/4 — اكتمل الفريق.")
+            progress.progress(1.0, text="اكتمل الفريق.")
             st.success("الفيديو تْصاوب وتْفحص. تفرّج فيه وراجع دقة المعلومات وحقوق استعمال كل لقطة قبل النشر.")
         except Exception as exc:
             st.error("توقف الفريق: " + str(exc)[:1800])
