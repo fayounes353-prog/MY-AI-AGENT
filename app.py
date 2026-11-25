@@ -924,7 +924,8 @@ def agent_download_link_video(url, temp_dir):
     except ImportError:
         raise RuntimeError("مكتبة تنزيل الفيديو ما زالت كتثبت. عاود المحاولة بعد إعادة تشغيل التطبيق.")
     template=os.path.join(temp_dir,"linked_source.%(ext)s")
-    options={"outtmpl":template,"format":"best[ext=mp4]/best","merge_output_format":"mp4",
+    options={"outtmpl":template,"format":"bestvideo*+bestaudio/best","merge_output_format":"mp4",
+             "ffmpeg_location":imageio_ffmpeg.get_ffmpeg_exe(),
              "noplaylist":True,"max_filesize":250*1024*1024,"socket_timeout":25,
              "retries":2,"quiet":True,"no_warnings":True}
     try:
@@ -1192,7 +1193,7 @@ with st.expander("1️⃣ Agent جلب الفيديو من الرابط", expand
     if st.session_state.get("agent_source_video_bytes"):
         st.caption("الفيديو الأصلي واجد للمونتاج: " + st.session_state.get("agent_source_video_title", "Source video"))
 
-with st.expander("3️⃣ وكيل المونتاج"):
+with st.expander("2️⃣ Agent المونتاج"):
     st.write("كيمنتج الفيديو الأصلي، كيضبط المدة ويضيف التعليق الصوتي باللغة المختارة.")
     if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=not (team_source_url.strip() or team_source_videos)):
         try:
@@ -1203,7 +1204,7 @@ with st.expander("3️⃣ وكيل المونتاج"):
             st.session_state["team_edit_note"] = note
             st.success("المونتاج واجد.")
         except Exception as exc: st.error("وكيل المونتاج: " + str(exc)[:1800])
-with st.expander("4️⃣ وكيل التحقق"):
+with st.expander("3️⃣ Agent التحقق"):
     st.write("كيفحص صلاحية MP4، قراءة الإطارات والمدة. الفحص التقني ما كيضمنش حقوق النشر أو الجودة الفنية.")
     if st.button("شغّل وكيل التحقق", key="run_verify"):
         if not st.session_state["agent_video"]: st.error("خاص الفيديو النهائي أولاً.")
