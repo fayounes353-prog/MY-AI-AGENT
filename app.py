@@ -614,20 +614,21 @@ def agent_recipe_search_queries(topic):
 
 
 def agent_find_recipe_image(topic):
-    """Find a representative Wikimedia Commons dish photo for user confirmation."""
+    """Find a relevant, verifiable dish photo from Wikimedia Commons."""
     variants = agent_recipe_search_queries(topic)
-    headers = {"User-Agent": "MYAIAgentCuisineStudio/1.0 (recipe image preview)"}
-    stop_words = {"the", "and", "for", "with", "from", "moroccan", "recipe", "dish", "traditional"}
-    topic_terms = {
-        t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", " ".join(variants[:3]))
-        if len(t) > 2 and t.lower() not in stop_words
-    }
+    headers = {"User-Agent": "MYAIAgentCuisineStudio/1.1 (recipe photo preview; contact: app)"}
+    stop_words = {"the", "and", "for", "with", "from", "moroccan", "recipe", "dish",
+                  "traditional", "food", "de", "la", "le", "les", "du", "des"}
     for query in variants:
+        query_terms = {
+            t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", query)
+            if len(t) > 2 and t.lower() not in stop_words
+        }
         params = urllib.parse.urlencode({
             "action": "query", "generator": "search",
-            "gsrsearch": query + " dish food", "gsrnamespace": 6,
-            "gsrlimit": 10, "prop": "imageinfo",
-            "iiprop": "url|extmetadata", "iiurlwidth": 1000, "format": "json"
+            "gsrsearch": query + " food", "gsrnamespace": 6,
+            "gsrlimit": 15, "prop": "imageinfo",
+            "iiprop": "url|extmetadata", "iiurlwidth": 1100, "format": "json"
         })
         request = urllib.request.Request(
             "https://commons.wikimedia.org/w/api.php?" + params, headers=headers
@@ -638,12 +639,25 @@ def agent_find_recipe_image(topic):
         except Exception:
             continue
         pages = list(payload.get("query", {}).get("pages", {}).values())
+        # Prefer images whose title/description actually names the requested dish.
+        ranked = []
         for page in pages:
-            title = str(page.get("title", ""))
-            title_terms = {t.lower() for t in re.findall(r"[A-Za-z0-9À-ÿء-ي]+", title)}
-            if topic_terms and not (topic_terms & title_terms):
-                continue
             info = (page.get("imageinfo") or [{}])[0]
+            metadata = info.get("extmetadata") or {}
+            def meta_value(key):
+                raw = metadata.get(key, {}).get("value", "")
+                return re.sub(r"<[^>]+>", " ", str(raw)).strip()
+            searchable = " ".join([
+                str(page.get("title", "")), meta_value("ObjectName"),
+                meta_value("ImageDescription")
+            ]).lower()
+            matched = {term for term in query_terms if term in searchable}
+            minimum = 1 if len(query_terms) <= 1 else min(2, len(query_terms))
+            if query_terms and len(matched) < minimum:
+                continue
+            ranked.append((len(matched), page, info, meta_value))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        for score, page, info, meta_value in ranked:
             image_url = info.get("thumburl") or info.get("url")
             if not image_url:
                 continue
@@ -658,13 +672,9 @@ def agent_find_recipe_image(topic):
                     continue
                 image = Image.open(io.BytesIO(image_bytes))
                 image.verify()
-                metadata = info.get("extmetadata") or {}
-                def meta_value(key):
-                    raw = metadata.get(key, {}).get("value", "")
-                    return re.sub(r"<[^>]+>", "", str(raw)).strip()
                 return {
                     "bytes": image_bytes,
-                    "title": title,
+                    "title": str(page.get("title", "صورة الطبق")),
                     "page": info.get("descriptionurl", ""),
                     "license": meta_value("LicenseShortName") or meta_value("UsageTerms") or "راجع صفحة المصدر",
                     "artist": meta_value("Artist") or "غير محدد"
@@ -1095,12 +1105,16 @@ if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
 if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
 
 if "agent_recipe_image" not in st.session_state: st.session_state["agent_recipe_image"] = None
+if "agent_recipe_image_topic" not in st.session_state: st.session_state["agent_recipe_image_topic"] = ""
+if "agent_recipe_image_error" not in st.session_state: st.session_state["agent_recipe_image_error"] = ""
 if "agent_confirmed_topic" not in st.session_state: st.session_state["agent_confirmed_topic"] = ""
 
 # Changing the recipe invalidates the previous photo approval and all recipe-specific results.
 if st.session_state.get("agent_last_topic", "") != team_topic.strip():
     st.session_state["agent_last_topic"] = team_topic.strip()
     st.session_state["agent_recipe_image"] = None
+    st.session_state["agent_recipe_image_topic"] = ""
+    st.session_state["agent_recipe_image_error"] = ""
     st.session_state["agent_confirmed_topic"] = ""
     st.session_state["agent_research"] = ""
     st.session_state["agent_clips"] = []
@@ -1108,38 +1122,55 @@ if st.session_state.get("agent_last_topic", "") != team_topic.strip():
     st.session_state["agent_verify"] = {}
 
 st.markdown("#### 🖼️ تأكيد الطبق قبل بدء الخدمة")
-st.caption("كتب اسم الوصفة، وغادي نقلبو على صورة ممثلة للطبق باش تأكد لينا واش هو اللي قصدتي.")
-if st.button("🔎 ورّيني صورة الطبق", key="find_recipe_photo", disabled=not bool(team_topic.strip())):
-    with st.spinner("كنقلب على صورة للطبق..."):
+st.caption("كتب اسم الوصفة، ومنين تأكد الإدخال غادي تظهر صورة الطبق هنا تلقائياً باش تأكدها قبل ما يبداو الوكلاء.")
+
+# Automatically fetch once per distinct recipe; no separate photo-search button is needed.
+current_topic = team_topic.strip()
+if current_topic and st.session_state.get("agent_recipe_image_topic") != current_topic:
+    st.session_state["agent_recipe_image"] = None
+    st.session_state["agent_confirmed_topic"] = ""
+    st.session_state["agent_recipe_image_error"] = ""
+    with st.spinner("كنقلب على صورة مطابقة للطبق..."):
         try:
-            st.session_state["agent_recipe_image"] = agent_find_recipe_image(team_topic.strip())
-            st.session_state["agent_confirmed_topic"] = ""
+            found_image = agent_find_recipe_image(current_topic)
+            st.session_state["agent_recipe_image"] = found_image
+            st.session_state["agent_recipe_image_topic"] = current_topic
+            if not found_image:
+                st.session_state["agent_recipe_image_error"] = "ما لقيناش صورة مطابقة بثقة لهاد الاسم. جرّب اسم آخر أو زيد وصفاً أدق."
         except Exception as exc:
             st.session_state["agent_recipe_image"] = None
-            st.error("تعذر البحث عن الصورة: " + str(exc)[:500])
+            st.session_state["agent_recipe_image_topic"] = current_topic
+            st.session_state["agent_recipe_image_error"] = "تعذر البحث عن الصورة: " + str(exc)[:350]
 
 recipe_image = st.session_state.get("agent_recipe_image")
-if recipe_image:
+if current_topic and recipe_image and st.session_state.get("agent_recipe_image_topic") == current_topic:
     st.image(recipe_image["bytes"], caption=recipe_image["title"], use_container_width=True)
     st.caption("المصدر: " + recipe_image.get("license", "راجع صفحة المصدر") +
                " — " + recipe_image.get("artist", "غير محدد"))
     if recipe_image.get("page"):
         st.markdown("[فتح صفحة الصورة الأصلية](" + recipe_image["page"] + ")")
-    if st.session_state.get("agent_confirmed_topic") == team_topic.strip():
+    if st.session_state.get("agent_confirmed_topic") == current_topic:
         st.success("تأكد الطبق. دابا يقدر الفريق يخدم على نفس الوصفة.")
     else:
         col_yes, col_retry = st.columns(2)
         with col_yes:
             if st.button("✅ نعم، هادي هي — كمل", type="primary", key="confirm_recipe_photo"):
-                st.session_state["agent_confirmed_topic"] = team_topic.strip()
+                st.session_state["agent_confirmed_topic"] = current_topic
                 st.rerun()
         with col_retry:
             if st.button("🔄 لا، قلب على صورة أخرى", key="retry_recipe_photo"):
+                st.session_state["agent_recipe_image_topic"] = ""
                 st.session_state["agent_recipe_image"] = None
                 st.session_state["agent_confirmed_topic"] = ""
                 st.rerun()
-else:
-    st.info("خاصك تعرض صورة الطبق وتأكد منها قبل تشغيل الوكلاء.")
+elif current_topic and st.session_state.get("agent_recipe_image_error"):
+    st.warning(st.session_state["agent_recipe_image_error"])
+    if st.button("🔄 عاود البحث على الصورة", key="retry_recipe_photo_empty"):
+        st.session_state["agent_recipe_image_topic"] = ""
+        st.session_state["agent_recipe_image_error"] = ""
+        st.rerun()
+elif not current_topic:
+    st.info("كتب اسم الوصفة باش تظهر صورة الطبق هنا.")
 
 
 
