@@ -1185,9 +1185,7 @@ with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
 
 with st.expander("3️⃣ وكيل المونتاج"):
     st.write("كيمنتج اللقطات الحقيقية اللي لقاها أو الفيديوهات اللي رفعتَها، ويضيف تعليقاً صوتياً آلياً. ما كيعوّضش الفيديو بصور ثابتة إذا ما لقا حتى لقطة مناسبة.")
-    if st.button("شغّل وكيل المونتاج", key="run_editor"):
-        if not agent_ready():
-            st.stop()
+    if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=st.session_state.get("agent_confirmed_topic") != team_topic.strip()):
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
                 video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), st.session_state["agent_research"], team_language), team_language)
@@ -1228,8 +1226,6 @@ if st.button("🎬 صايب الفيديو دابا", type="primary", use_contai
             st.success("الفيديو تْصاوب وتْفحص. تفرّج فيه وراجع دقة المعلومات وحقوق استعمال كل لقطة قبل النشر.")
         except Exception as exc:
             st.error("توقف الفريق: " + str(exc)[:1800])
-    else:
-        st.error("كتب اسم الوصفة أولاً.")
 
 if st.session_state["agent_verify"]:
     st.markdown("**نتيجة التحقق:**")
