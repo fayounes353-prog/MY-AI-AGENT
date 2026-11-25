@@ -944,11 +944,26 @@ def agent_download_link_video(url, temp_dir):
                            "جرّب رابطاً مباشراً أو ارفع الملف. التفاصيل: "+str(exc)[:450])
 
 
-def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar", source_url=""):
+def agent_fetch_video_bytes(url):
+    """Source agent: fetch a user-authorized video and return its bytes for the editor agent."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        item = agent_download_link_video(url, temp_dir)
+        with open(item["path"], "rb") as source:
+            return source.read(), item["title"]
+
+
+def agent_edit_video(topic, clips, target_seconds, uploaded_sources=None, narration_text="", language="ar", source_url="", source_video_bytes=b"", source_video_name="Linked video"):
     """Editor agent: assemble topic-relevant reusable footage into a vertical MP4 with spoken narration."""
     with tempfile.TemporaryDirectory() as temp_dir:
         usable = agent_download_cc_videos(clips, temp_dir)
-        if source_url.strip():
+        if source_video_bytes:
+            linked_path = os.path.join(temp_dir, "agent1_source.mp4")
+            with open(linked_path, "wb") as linked_file:
+                linked_file.write(source_video_bytes)
+            usable.append({"path": linked_path, "title": source_video_name,
+                           "license": "User supplied link — permission not verified",
+                           "artist": "User supplied", "page": source_url or "User supplied source"})
+        elif source_url.strip():
             usable.append(agent_download_link_video(source_url, temp_dir))
         for upload_index, uploaded in enumerate(uploaded_sources or []):
             try:
@@ -1136,6 +1151,8 @@ if "agent_research" not in st.session_state: st.session_state["agent_research"] 
 if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
 if "agent_video" not in st.session_state: st.session_state["agent_video"] = b""
 if "agent_verify" not in st.session_state: st.session_state["agent_verify"] = {}
+if "agent_source_video_bytes" not in st.session_state: st.session_state["agent_source_video_bytes"] = b""
+if "agent_source_video_title" not in st.session_state: st.session_state["agent_source_video_title"] = ""
 
 if "agent_research" not in st.session_state: st.session_state["agent_research"] = ""
 if "agent_clips" not in st.session_state: st.session_state["agent_clips"] = []
@@ -1155,41 +1172,32 @@ def agent_ready():
     return True
 
 st.markdown("#### الوكلاء والمهام ديالهم")
-with st.expander("1️⃣ وكيل البحث — الوصفة والمقادير", expanded=False):
-    st.write("كيبحث على الوصفة اللي كتبتي: المقادير والكميات وطريقة التحضير ووقت الطهي، ويجمع المصادر. ما خاصوش يخترع مقادير أو خطوات.")
-    if st.button("شغّل وكيل البحث", key="run_research"):
-        if agent_ready():
-            try:
-                with st.spinner("وكيل البحث كيقلب..."):
-                    research = search_anything_on_web("وصفة " + team_topic.strip() + " المقادير الكميات طريقة التحضير وقت الطهي", GEMINI_API_KEY, OPENROUTER_API_KEY)
-                st.session_state["agent_research"] = research
-                st.success("وكيل البحث سالا.")
-                st.markdown(research)
-                st.caption("نتائج البحث النصي محفوظة؛ شغّل وكيل الفيديوهات بشكل مستقل للبحث عن اللقطات.")
-            except Exception as exc: st.error("وكيل البحث: " + str(exc)[:1500])
-    if st.session_state["agent_research"]:
-        st.text_area("نتيجة البحث المحفوظة", st.session_state["agent_research"], height=160, key="research_preview")
-
-with st.expander("2️⃣ وكيل لقطات الطبخ المرخصة"):
-    st.write("كيعالج رابط الفيديو اللي دخلتيه إذا كانت المنصة كتسمح بالوصول. خاص يكون عندك إذن التنزيل والتعديل.")
-    if st.button("شغّل وكيل الفيديوهات", key="run_clips"):
-        if not agent_ready():
-            pass
+with st.expander("1️⃣ Agent جلب الفيديو من الرابط", expanded=True):
+    st.write("كيجلب الفيديو من الرابط اللي دخلتي وكيحضّرو باش يتسلم لوكيل المونتاج. خاصك تكون مالك الفيديو أو عندك إذن واضح باستعماله.")
+    if st.button("⬇️ جلب الفيديو", key="fetch_source_video"):
+        if not team_source_url.strip():
+            st.error("دخل رابط الفيديو أولاً.")
+        elif not team_permission:
+            st.warning("أكد أن عندك الحق في تنزيل الفيديو وتعديله.")
         else:
             try:
-                with st.spinner("كيقلب على فيديوهات قابلة للاستعمال..."):
-                    st.session_state["agent_clips"] = agent_find_video_sources(team_topic.strip(), limit=12)
-                st.success(f"لقى {len(st.session_state['agent_clips'])} فيديو مرشح.")
-            except Exception as exc: st.error("وكيل الفيديوهات: " + str(exc)[:1200])
-    for clip in st.session_state["agent_clips"][:12]:
-        st.markdown(f"- **{clip.get('title','Video')}** — {clip.get('license','license unknown')} — [المصدر]({clip.get('page')})" if clip.get("page") else f"- {clip.get('title','Video')} — {clip.get('license','license unknown')}")
+                with st.spinner("Agent 1 كيجلب الفيديو من الرابط..."):
+                    source_bytes, source_title = agent_fetch_video_bytes(team_source_url.strip())
+                st.session_state["agent_source_video_bytes"] = source_bytes
+                st.session_state["agent_source_video_title"] = source_title
+                st.success("تم جلب الفيديو وتسليمه للوكيل الثاني: " + source_title)
+            except Exception as exc:
+                st.session_state["agent_source_video_bytes"] = b""
+                st.error("Agent 1: " + str(exc)[:1200])
+    if st.session_state.get("agent_source_video_bytes"):
+        st.caption("الفيديو الأصلي واجد للمونتاج: " + st.session_state.get("agent_source_video_title", "Source video"))
 
 with st.expander("3️⃣ وكيل المونتاج"):
     st.write("كيمنتج الفيديو الأصلي، كيضبط المدة ويضيف التعليق الصوتي باللغة المختارة.")
     if st.button("شغّل وكيل المونتاج", key="run_editor", disabled=not (team_source_url.strip() or team_source_videos)):
         try:
             with st.spinner("كيحوّل ويركب المقاطع..."):
-                video, used, note = agent_edit_video(team_topic.strip(), st.session_state["agent_clips"], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), st.session_state["agent_research"], team_language), team_language, team_source_url.strip())
+                video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, agent_build_narration_text(team_topic.strip(), "", team_language), team_language, team_source_url.strip(), st.session_state.get("agent_source_video_bytes", b""), st.session_state.get("agent_source_video_title", "Linked video"))
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"] = used
             st.session_state["team_edit_note"] = note
@@ -1210,14 +1218,16 @@ with st.expander("4️⃣ وكيل التحقق"):
 if st.button("🎬 صايب الفيديو دابا", type="primary", use_container_width=True, key="run_all_agents"):
     if agent_ready():
         try:
-            progress = st.progress(0, text="1/3 — جلب الفيديو من الرابط...")
-            research = "المصدر الأساسي هو الفيديو الذي أدخل المستخدم رابطه. لا تُضاف لقطات أخرى من البحث."
-            st.session_state["agent_research"] = research
-            clips = []
-            st.session_state["agent_clips"] = clips
-            progress.progress(1/3, text="2/3 — المونتاج والصوت...")
+            progress = st.progress(0, text="1/3 — Agent 1: جلب الفيديو...")
+            source_bytes = st.session_state.get("agent_source_video_bytes", b"")
+            source_title = st.session_state.get("agent_source_video_title", "Linked video")
+            if team_source_url.strip() and not source_bytes:
+                source_bytes, source_title = agent_fetch_video_bytes(team_source_url.strip())
+                st.session_state["agent_source_video_bytes"] = source_bytes
+                st.session_state["agent_source_video_title"] = source_title
+            progress.progress(1/3, text="2/3 — Agent 2: المونتاج والصوت...")
             narration = agent_build_narration_text(team_topic.strip(), "", team_language)
-            video, used, note = agent_edit_video(team_topic.strip(), clips, team_duration, team_source_videos, narration, team_language, team_source_url.strip())
+            video, used, note = agent_edit_video(team_topic.strip(), [], team_duration, team_source_videos, narration, team_language, team_source_url.strip(), source_bytes, source_title)
             st.session_state["agent_video"] = video
             st.session_state["team_used_clips"], st.session_state["team_edit_note"] = used, note
             progress.progress(2/3, text="3/3 — التحقق من الفيديو النهائي...")
